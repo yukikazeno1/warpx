@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Write one particle-rich plotfile from the latest long-run checkpoint.
-# This is intended for Ishizawa-style species-flow / pressure-tensor analysis.
-# It does NOT rerun the simulation from t=0.
+# Write a short sequence of particle-rich plotfiles from the latest long-run
+# checkpoint. This is intended for Ishizawa-style species-flow / pressure-
+# tensor diagnostics. It does NOT rerun the simulation from t=0.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -12,6 +12,12 @@ WARPX_EXE="${WARPX_EXE:-${REPO_ROOT}/build/bin/warpx.2d}"
 PPC="${PPC:-64}"
 SOURCE_RUN="${SOURCE_RUN:-${SCRIPT_DIR}/runs_long/ppc${PPC}}"
 OUT_DIR="${OUT_DIR:-${SCRIPT_DIR}/runs_ishizawa/ppc${PPC}}"
+
+# Defaults produce two or three particle-rich states near the checkpoint,
+# depending on whether WarpX writes diagnostics immediately on restart.
+# Override if desired, e.g. EXTRA_STEPS=20 PARTICLE_DIAG_INTERVAL=5.
+EXTRA_STEPS="${EXTRA_STEPS:-10}"
+PARTICLE_DIAG_INTERVAL="${PARTICLE_DIAG_INTERVAL:-5}"
 
 export AMREX_DEFAULT_INIT="${AMREX_DEFAULT_INIT:-amrex.the_arena_init_size=0}"
 
@@ -33,9 +39,8 @@ fi
 
 base="$(basename "${latest_chk}")"
 stepstr="${base#chk}"
-# Strip leading zeros safely via base-10 expansion.
 step=$((10#${stepstr}))
-target=$((step + 1))
+target=$((step + EXTRA_STEPS))
 
 mkdir -p "${OUT_DIR}"
 input="${OUT_DIR}/inputs_particle_snapshot"
@@ -45,21 +50,21 @@ sed \
     -e "s/^ions\.num_particles_per_cell_each_dim *=.*/ions.num_particles_per_cell_each_dim = ${DIMS}/" \
     -e "s/^my_constants\.epsb *=.*/my_constants.epsb = 0.0/" \
     -e "s/^max_step *=.*/max_step = ${target}/" \
-    -e "s/^diag1\.intervals *=.*/diag1.intervals = 1/" \
+    -e "s/^diag1\.intervals *=.*/diag1.intervals = ${PARTICLE_DIAG_INTERVAL}/" \
     -e "s/^diag1\.write_species *=.*/diag1.write_species = 1/" \
     "${BASE_INPUT}" > "${input}"
 
-# Use an absolute checkpoint path so the snapshot can be written in a separate
-# directory without touching the production run.
 chk_abs="$(cd "$(dirname "${latest_chk}")" && pwd)/$(basename "${latest_chk}")"
 
 echo "=============================================================================="
-echo "Ishizawa particle-rich diagnostic snapshot"
-echo "PPC              : ${PPC}"
-echo "restart checkpoint: ${chk_abs}"
-echo "restart step      : ${step}"
-echo "target step       : ${target}"
-echo "output directory  : ${OUT_DIR}"
+echo "Ishizawa particle-rich diagnostic sequence"
+echo "PPC                   : ${PPC}"
+echo "restart checkpoint    : ${chk_abs}"
+echo "restart step          : ${step}"
+echo "extra steps           : ${EXTRA_STEPS}"
+echo "particle diag interval: ${PARTICLE_DIAG_INTERVAL}"
+echo "target step           : ${target}"
+echo "output directory      : ${OUT_DIR}"
 echo "=============================================================================="
 
 (
@@ -69,5 +74,5 @@ echo "==========================================================================
 )
 
 echo
-echo "Particle-rich snapshot completed."
+echo "Particle-rich diagnostic sequence completed."
 echo "Inspect: ${OUT_DIR}/diags/diag1*"
