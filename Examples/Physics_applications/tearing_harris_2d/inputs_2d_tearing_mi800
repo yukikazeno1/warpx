@@ -1,0 +1,176 @@
+###############################################################################
+# 2D fully kinetic Harris-sheet tearing pilot
+# electron-ion mass ratio mi/me = 800
+#
+# Geometry: X-Z
+# Current:  Y
+# Reconnecting field: Bx(z)
+#
+# The default configuration here is NO-SEED and 4 PPC/species.  The convergence
+# driver overrides the PPC on the command line for 4/16/64 PPC runs.
+###############################################################################
+
+#################################
+# Simulation
+#################################
+
+max_step = 2000
+
+warpx.verbose = 1
+warpx.cfl = 0.95
+warpx.random_seed = 12345
+warpx.serialize_initial_conditions = 1
+warpx.use_filter = 0
+
+#################################
+# Physical constants / scales
+#################################
+
+my_constants.n0 = 1.0e19
+my_constants.mi = 800.0*m_e
+
+my_constants.wpe = sqrt(n0*q_e**2/(epsilon0*m_e))
+my_constants.de  = clight/wpe
+
+# Harris sheet half-thickness
+my_constants.sheet_l = de
+
+# Electron thermal normalized momentum p_th/(m_e c)
+my_constants.uth_e = 0.1
+
+# k_B*T written as an energy
+my_constants.te = uth_e**2*m_e*clight**2
+my_constants.ti = 0.1*te
+
+# Ion thermal normalized momentum
+my_constants.uth_i = sqrt(ti/(mi*clight**2))
+
+# Harris pressure balance: B0^2/(2 mu0) = n0 (Te + Ti)
+my_constants.b0 = sqrt(2.0*mu0*n0*(te+ti))
+
+#################################
+# Harris drift velocities
+#################################
+
+# Physical beta = v/c
+my_constants.beta_de = 2.0*te/(q_e*b0*sheet_l*clight)
+my_constants.beta_di = 2.0*ti/(q_e*b0*sheet_l*clight)
+
+# WarpX Gaussian mean normalized momentum u = gamma*beta = p/(m c)
+my_constants.ude = -beta_de/sqrt(1.0-beta_de**2)
+my_constants.udi =  beta_di/sqrt(1.0-beta_di**2)
+
+#################################
+# Box
+#################################
+
+my_constants.lx = 16.0*sheet_l
+my_constants.lz =  8.0*sheet_l
+
+geometry.dims = 2
+geometry.prob_lo = -0.5*lx  -0.5*lz
+geometry.prob_hi =  0.5*lx   0.5*lz
+
+amr.n_cell = 256 128
+amr.max_level = 0
+amr.max_grid_size = 64
+amr.blocking_factor = 32
+
+#################################
+# Boundary conditions
+#################################
+
+# 2D coordinates are x,z
+boundary.field_lo = periodic pec
+boundary.field_hi = periodic pec
+
+boundary.particle_lo = periodic reflecting
+boundary.particle_hi = periodic reflecting
+
+#################################
+# PIC algorithms
+#################################
+
+algo.maxwell_solver = yee
+algo.current_deposition = esirkepov
+algo.particle_pusher = boris
+algo.field_gathering = energy-conserving
+algo.particle_shape = 2
+
+###############################################################################
+# Initial magnetic field
+###############################################################################
+
+my_constants.kx = 2.0*pi/lx
+my_constants.kz = pi/lz
+
+# Default for the convergence study: no explicit tearing seed.
+# Override with e.g. my_constants.epsb=0.01 for the seeded pilot.
+my_constants.epsb = 0.0
+my_constants.a1 = epsb*b0/kx
+
+warpx.B_ext_grid_init_style = parse_B_ext_grid_function
+warpx.Bx_external_grid_function(x,y,z) = "b0*tanh(z/sheet_l) + a1*kz*cos(kx*x)*sin(kz*z)"
+warpx.By_external_grid_function(x,y,z) = "0.0"
+warpx.Bz_external_grid_function(x,y,z) = "-a1*kx*sin(kx*x)*cos(kz*z)"
+
+###############################################################################
+# Species
+###############################################################################
+
+particles.species_names = electrons ions
+
+#################################
+# Electrons
+#################################
+
+electrons.charge = -q_e
+electrons.mass   = m_e
+
+electrons.injection_style = NUniformPerCell
+electrons.num_particles_per_cell_each_dim = 2 2
+
+electrons.profile = parse_density_function
+electrons.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+
+electrons.momentum_distribution_type = gaussian
+electrons.ux_m = 0.0
+electrons.uy_m = ude
+electrons.uz_m = 0.0
+electrons.ux_th = uth_e
+electrons.uy_th = uth_e
+electrons.uz_th = uth_e
+
+#################################
+# Ions
+#################################
+
+ions.charge = q_e
+ions.mass   = mi
+
+ions.injection_style = NUniformPerCell
+ions.num_particles_per_cell_each_dim = 2 2
+
+ions.profile = parse_density_function
+ions.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+
+ions.momentum_distribution_type = gaussian
+ions.ux_m = 0.0
+ions.uy_m = udi
+ions.uz_m = 0.0
+ions.ux_th = uth_i
+ions.uy_th = uth_i
+ions.uz_th = uth_i
+
+###############################################################################
+# Diagnostics
+###############################################################################
+
+diagnostics.diags_names = diag1
+
+diag1.diag_type = Full
+# High cadence is deliberate for the PPC convergence test so the early
+# noise-injection stage is resolved.
+diag1.intervals = 10
+
+diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
