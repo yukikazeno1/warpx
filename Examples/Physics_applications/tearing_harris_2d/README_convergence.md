@@ -16,7 +16,7 @@ All three cases are **no-seed** runs (`epsb=0`) and use the same physical and nu
 - `ppc16`: `4 x 4 = 16` PPC/species
 - `ppc64`: `8 x 8 = 64` PPC/species
 
-The default run length is 2000 steps. Diagnostics are written every 10 steps so that the early noise-injection stage can be resolved.
+The default run length is 2000 steps. Diagnostics are written every 10 steps so that the early noise-injection stage can be resolved. Particle dumps are explicitly disabled in these high-cadence diagnostics; the convergence analysis only needs mesh fields, which keeps the 64-PPC output size manageable.
 
 ## Run
 
@@ -24,7 +24,7 @@ From this directory:
 
 ```bash
 export AMREX_DEFAULT_INIT="amrex.the_arena_init_size=0"
-./run_ppc_convergence.sh
+bash run_ppc_convergence.sh
 ```
 
 By default the script expects the executable at:
@@ -36,7 +36,19 @@ By default the script expects the executable at:
 Set `WARPX_EXE` to override it:
 
 ```bash
-WARPX_EXE=/path/to/warpx.2d ./run_ppc_convergence.sh
+WARPX_EXE=/path/to/warpx.2d bash run_ppc_convergence.sh
+```
+
+Run only a subset if desired:
+
+```bash
+CASES="16 64" bash run_ppc_convergence.sh
+```
+
+Existing runs are skipped. To deliberately rerun a case from scratch:
+
+```bash
+FORCE=1 CASES="16" bash run_ppc_convergence.sh
 ```
 
 Each case is written to its own directory:
@@ -63,8 +75,11 @@ This produces:
 ```text
 ppc_convergence_noise_scaling.png
 ppc_convergence_m1_history.png
-ppc_convergence_spectrum.png
+ppc_convergence_m1_fraction.png
+ppc_convergence_spectrum_early.png
+ppc_convergence_spectrum_final.png
 ppc_convergence_summary.txt
+ppc_convergence_summary.csv
 ```
 
 The analysis reports, for each PPC:
@@ -74,7 +89,7 @@ The analysis reports, for each PPC:
 - phase-independent `m=1` Fourier amplitude in the core;
 - the early-time broadband noise level;
 - a log-log fit of noise floor versus PPC;
-- the core Fourier spectrum `m=1..20` at selected times.
+- the core Fourier spectrum `m=1..20` at early and final times.
 
 For pure PIC shot-noise scaling one expects approximately
 
@@ -85,3 +100,18 @@ noise ~ Nppc^(-1/2)
 so changing 4 -> 16 -> 64 PPC should reduce the noise by roughly factors `1`, `1/2`, and `1/4`, respectively.
 
 A stronger indication of physical noise-seeded tearing is obtained if higher-PPC runs start from a lower noise floor but later show the same exponential `m=1` slope, shifted later in time.
+
+## Single-run diagnostic
+
+For an individual no-seed run:
+
+```bash
+cd runs/ppc4
+python ../../track_tearing_mode.py --seed-eps 0
+```
+
+For a seeded run with `epsb=0.01`, use:
+
+```bash
+python track_tearing_mode.py --seed-eps 0.01
+```
