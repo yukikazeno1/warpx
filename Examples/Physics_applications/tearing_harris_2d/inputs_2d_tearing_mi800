@@ -173,4 +173,8 @@ diag1.diag_type = Full
 # noise-injection stage is resolved.
 diag1.intervals = 10
 
+# The convergence analysis only needs mesh fields.  Explicitly disabling
+# particle dumps keeps the 64-PPC case from generating enormous plotfiles.
+diag1.write_species = 0
+
 diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
