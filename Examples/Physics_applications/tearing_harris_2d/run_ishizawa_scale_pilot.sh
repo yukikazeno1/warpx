@@ -14,6 +14,11 @@ WARPX_EXE="${WARPX_EXE:-${REPO_ROOT}/build/bin/warpx.2d}"
 # MODE=early  : 10,000 steps  -> omega_ci t = 0.25
 # MODE=onset  : 100,000 steps -> omega_ci t = 2.5
 # MODE=steady : 320,000 steps -> omega_ci t = 8.0 (HPC-scale target)
+#
+# Output cadence is intentionally sparse because a single checkpoint is about
+# 1.4 GB for the 49-PPC, 512x512 case, while one mesh-only plotfile is only
+# about 25 MB.  Therefore checkpoint cadence is reduced much more aggressively
+# than field-diagnostic cadence.
 MODE="${MODE:-memory}"
 PPC="${PPC:-49}"
 FORCE="${FORCE:-0}"
@@ -38,22 +43,30 @@ case "${MODE}" in
     smoke)
         TARGET_STEPS="${TARGET_STEPS:-100}"
         DIAG_INTERVAL="${DIAG_INTERVAL:-100}"
-        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
+        # No periodic checkpoint is needed during a 100-step smoke test;
+        # dump_last_timestep still writes the final restart state.
+        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-1000}"
         ;;
     early)
         TARGET_STEPS="${TARGET_STEPS:-10000}"
-        DIAG_INTERVAL="${DIAG_INTERVAL:-500}"
-        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-2000}"
+        # Delta(omega_ci t)=0.025 between field outputs.
+        DIAG_INTERVAL="${DIAG_INTERVAL:-1000}"
+        # About two restart files over the full early run.
+        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-5000}"
         ;;
     onset)
         TARGET_STEPS="${TARGET_STEPS:-100000}"
-        DIAG_INTERVAL="${DIAG_INTERVAL:-1000}"
-        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-5000}"
+        # Delta(omega_ci t)=0.0625 between field outputs.
+        DIAG_INTERVAL="${DIAG_INTERVAL:-2500}"
+        # About five restart files over the full onset run.
+        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-20000}"
         ;;
     steady)
         TARGET_STEPS="${TARGET_STEPS:-320000}"
-        DIAG_INTERVAL="${DIAG_INTERVAL:-2000}"
-        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-10000}"
+        # Delta(omega_ci t)=0.125 between field outputs.
+        DIAG_INTERVAL="${DIAG_INTERVAL:-5000}"
+        # About eight restart files over the full steady target.
+        CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-40000}"
         ;;
     *)
         echo "ERROR: MODE must be memory|smoke|early|onset|steady" >&2
