@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-"""
-Ishizawa-inspired field/topology diagnostics for the long-time Harris run.
+"""Ishizawa-inspired field/topology diagnostics for the long-time Harris run.
 
-The present WarpX AMReX/yt 2D plotfiles label jx,jy,jz with the unit ``A``.
-Those arrays are nevertheless the native WarpX current-density mesh values.
-Attempting ``to_value('A/m**2')`` therefore raises a yt/unyt dimensional error.
-This script reads current arrays in their native numerical representation and
-cross-checks them against curl(B)/mu0.  B, E and charge-density fields are still
-converted explicitly to SI through yt.
+This version is deliberately robust to AMReX/yt metadata issues in 2D WarpX
+plotfiles.  In the current plotfiles, jx/jy/jz may be labelled as ``A`` and
+rho_ions may be labelled dimensionless even though the native stored numerical
+values are physical mesh quantities.  We therefore read J and rho in native
+form, infer one fixed conversion scale from the first state, and independently
+cross-check current against curl(B)/mu0.
 
-Geometry mapping relative to Ishizawa & Horiuchi (2005):
+Geometry mapping to Ishizawa & Horiuchi (2005):
   paper x (outflow)      -> WarpX x
   paper y (inflow)       -> WarpX z
   paper z (out of plane) -> WarpX y
 Thus paper J_z and E_z correspond to WarpX J_y and E_y.
 
-Existing mesh-only outputs can diagnose topology, X/O points, reconnecting flux,
-reconnection electric field, current-sheet structure and a Hall-term estimate.
-A full Fig. 3 pressure-tensor / inertia decomposition requires particle/species
-moments and is intentionally not claimed here.
+The existing mesh-only output supports topology, X/O points, reconnecting flux,
+E_y at the X point, current-sheet profiles, B_y Hall structure, and a partial
+Hall-term estimate.  Full pressure-tensor/inertia decomposition requires
+particle/species moments and is not claimed here.
 """
 
 import argparse
@@ -61,13 +60,13 @@ def physical_params():
     mu0 = 1.2566370612685e-6
     c = 299792458.0
     n0 = 1.0e19
-    mi = 800.0 * me
+    mi = 800.0*me
     uth_e = 0.1
 
-    wpe = np.sqrt(n0 * qe**2/(eps0*me))
+    wpe = np.sqrt(n0*qe**2/(eps0*me))
     de = c/wpe
     L = de
-    Te = uth_e**2 * me*c**2
+    Te = uth_e**2*me*c**2
     Ti = 0.1*Te
     B0 = np.sqrt(2.0*mu0*n0*(Te+Ti))
     vA = B0/np.sqrt(mu0*n0*mi)
@@ -112,19 +111,19 @@ def load_fields(path):
     jx, ujx = fld_native("jx")
     jy, ujy = fld_native("jy")
     jz, ujz = fld_native("jz")
+    rhoi, urhoi = fld_native("rho_ions")
 
     return {
         "ds": ds, "x": x, "z": z, "dx": dx, "dz": dz,
-        "Bx": fld_si("Bx", "T"), "By": fld_si("By", "T"), "Bz": fld_si("Bz", "T"),
-        "Ey": fld_si("Ey", "V/m"),
-        "jx": jx, "jy": jy, "jz": jz,
+        "Bx": fld_si("Bx", "T"), "By": fld_si("By", "T"),
+        "Bz": fld_si("Bz", "T"), "Ey": fld_si("Ey", "V/m"),
+        "jx_raw": jx, "jy_raw": jy, "jz_raw": jz,
         "j_units": (ujx, ujy, ujz),
-        "rho_i": fld_si("rho_ions", "C/m**3"),
+        "rho_i_raw": rhoi, "rho_i_units": urhoi,
     }
 
 
 def curl_current(F, mu0):
-    """2D x-z curl(B)/mu0; useful as a unit/scale cross-check."""
     dx, dz = F["dx"], F["dz"]
     dBy_dz = np.gradient(F["By"], dz, axis=1, edge_order=2)
     dBy_dx = np.gradient(F["By"], dx, axis=0, edge_order=2)
@@ -135,8 +134,42 @@ def curl_current(F, mu0):
             dBy_dx/mu0)
 
 
+def infer_rho_scale(raw, p):
+    """Infer whether native rho_ions values are charge density or number density."""
+    peak = float(np.nanpercentile(np.abs(raw), 99.5))
+    charge_ref = p["qe"]*p["n0"]
+    number_ref = p["n0"]
+
+    if peak > 0 and 1.0e-4 <= peak/charge_ref <= 1.0e4:
+        return 1.0, "native values consistent with C/m^3"
+    if peak > 0 and 1.0e-4 <= peak/number_ref <= 1.0e4:
+        return p["qe"], "native values look like number density; multiplied by e"
+
+    # Last-resort normalization: make the 99.5th percentile equal to e*n0.
+    # The script reports this prominently because it is an inference.
+    if peak > 0:
+        return charge_ref/peak, "fallback scale chosen from peak ~ e*n0"
+    return 1.0, "rho field is zero; no scale inference possible"
+
+
+def infer_current_scale(jraw, jcurl, z, L):
+    """Infer one native-J scale from the first state using the Harris core.
+
+    This is a metadata repair, not a physical assertion that curl(B)/mu0 equals
+    deposited J exactly.  In an unsteady EM system the displacement current can
+    produce a real difference.  We therefore use only one fixed scale and keep
+    reporting the residual afterwards.
+    """
+    core = np.abs(z) <= 2.0*L
+    mask = np.broadcast_to(core[None, :], jraw.shape)
+    mask &= np.isfinite(jraw) & np.isfinite(jcurl)
+    den = np.sum(jraw[mask]**2)
+    if den <= 0:
+        return 1.0
+    return float(np.sum(jraw[mask]*jcurl[mask])/den)
+
+
 def reconstruct_Ay(Bx, Bz, x, z):
-    """Reconstruct A_y with Bz=dAy/dx and Bx=-dAy/dz, up to a gauge."""
     nx, nz = Bx.shape
     dx = x[1]-x[0]
     dz = z[1]-z[0]
@@ -166,9 +199,9 @@ def midplane_xo(Ay, jy, x, z):
     left = np.roll(line, 1)
     right = np.roll(line, -1)
     extrema = ((line >= left) & (line >= right)) | ((line <= left) & (line <= right))
-    d2x = (right - 2.0*line + left)/dx**2
+    d2x = (right-2.0*line+left)/dx**2
     if 0 < iz < Ay.shape[1]-1:
-        d2z = (Ay[:,iz+1]-2.0*Ay[:,iz]+Ay[:,iz-1])/dz**2
+        d2z = (Ay[:, iz+1]-2.0*Ay[:, iz]+Ay[:, iz-1])/dz**2
     else:
         d2z = np.zeros(nx)
 
@@ -179,12 +212,12 @@ def midplane_xo(Ay, jy, x, z):
     if len(xs) == 0 or len(os_) == 0:
         ext = np.where(extrema)[0]
         if len(ext) < 2:
-            ix = int(np.argmax(np.abs(jy[:,iz])))
-            return ix, (ix+nx//2)%nx, iz
+            ix = int(np.argmax(np.abs(jy[:, iz])))
+            return ix, (ix+nx//2) % nx, iz
         xs = ext[d2x[ext] > 0]
         os_ = ext[d2x[ext] < 0]
         if len(xs) == 0 or len(os_) == 0:
-            ix = int(ext[np.argmax(np.abs(jy[ext,iz]))])
+            ix = int(ext[np.argmax(np.abs(jy[ext, iz]))])
             io = int(ext[np.argmax(np.abs(line[ext]-line[ix]))])
             return ix, io, iz
 
@@ -192,7 +225,7 @@ def midplane_xo(Ay, jy, x, z):
     for ix in xs:
         for io in os_:
             dpsi = abs(line[io]-line[ix])
-            dd = min((io-ix)%nx, (ix-io)%nx)
+            dd = min((io-ix) % nx, (ix-io) % nx)
             score = (dpsi, -dd)
             if best is None or score > best[0]:
                 best = (score, int(ix), int(io))
@@ -200,7 +233,6 @@ def midplane_xo(Ay, jy, x, z):
 
 
 def hall_electric_y(jx, jz, Bx, Bz, rho_i, p):
-    # (J x B)_y = J_z B_x - J_x B_z.
     jxb_y = jz*Bx - jx*Bz
     ni = rho_i/p["qe"]
     out = np.full_like(jxb_y, np.nan)
@@ -209,11 +241,8 @@ def hall_electric_y(jx, jz, Bx, Bz, rho_i, p):
     return out
 
 
-def relative_rms(a, b, mask=None):
-    if mask is None:
-        mask = np.isfinite(a) & np.isfinite(b)
-    else:
-        mask = mask & np.isfinite(a) & np.isfinite(b)
+def relative_rms(a, b, mask):
+    mask = mask & np.isfinite(a) & np.isfinite(b)
     if not np.any(mask):
         return np.nan
     den = np.sqrt(np.mean(b[mask]**2))
@@ -242,54 +271,62 @@ def main():
     print("NOTE: d_i lies far outside the present box; the full l_mi<z<d_i")
     print("      gyroviscous-cancellation region cannot be represented here.")
 
+    # Infer unit-repair scales from the first state only, then keep them fixed.
+    F0 = load_fields(files[0])
+    J0cx, J0cy, J0cz = curl_current(F0, p["mu0"])
+    rho_scale, rho_note = infer_rho_scale(F0["rho_i_raw"], p)
+    j_scale = infer_current_scale(F0["jy_raw"], J0cy, F0["z"], p["L"])
+
+    print(f"yt current metadata units : {F0['j_units']}")
+    print(f"yt rho_ions metadata unit : {F0['rho_i_units']}")
+    print(f"native rho scale -> C/m^3 : {rho_scale:.8e} ({rho_note})")
+    print(f"native J scale -> A/m^2   : {j_scale:.8e} (inferred once from initial Jy vs curlB)")
+
     rows = []
     last = None
-    unit_reported = False
 
     for ipf, fn in enumerate(files, start=1):
         F = load_fields(fn)
-        if not unit_reported:
-            print(f"yt current metadata units (jx,jy,jz): {F['j_units']}")
-            print("Reading j arrays as native WarpX mesh values; curl(B)/mu0 is used as a scale check.")
-            unit_reported = True
+        F["rho_i"] = rho_scale*F["rho_i_raw"]
+        F["jx"] = j_scale*F["jx_raw"]
+        F["jy"] = j_scale*F["jy_raw"]
+        F["jz"] = j_scale*F["jz_raw"]
 
         Jcx, Jcy, Jcz = curl_current(F, p["mu0"])
         Ay = reconstruct_Ay(F["Bx"], F["Bz"], F["x"], F["z"])
         ix, io, iz = midplane_xo(Ay, F["jy"], F["x"], F["z"])
 
-        Hall_raw = hall_electric_y(F["jx"], F["jz"], F["Bx"], F["Bz"], F["rho_i"], p)
+        Hall_dep = hall_electric_y(F["jx"], F["jz"], F["Bx"], F["Bz"], F["rho_i"], p)
         Hall_curl = hall_electric_y(Jcx, Jcz, F["Bx"], F["Bz"], F["rho_i"], p)
 
         core = np.abs(F["z"]) <= p["L"]
-        mask2d = np.broadcast_to(core[None,:], F["jy"].shape)
+        mask2d = np.broadcast_to(core[None, :], F["jy"].shape)
         jy_curl_err = relative_rms(F["jy"], Jcy, mask2d)
 
         t = F["ds"].current_time.to_value("s")/p["tauA"]
-        psi = abs(Ay[io,iz]-Ay[ix,iz])/(p["B0"]*p["L"])
+        psi = abs(Ay[io, iz]-Ay[ix, iz])/(p["B0"]*p["L"])
         E0 = p["vA"]*p["B0"]
-        J0 = p["B0"]/(p["mu0"]*p["L"])
-        eyx = F["Ey"][ix,iz]/E0
-        hallx = Hall_raw[ix,iz]/E0
-        hallcurlx = Hall_curl[ix,iz]/E0
-        jyx = F["jy"][ix,iz]/J0
+        Jnorm = p["B0"]/(p["mu0"]*p["L"])
+        eyx = F["Ey"][ix, iz]/E0
+        hallx = Hall_dep[ix, iz]/E0
+        hallcurlx = Hall_curl[ix, iz]/E0
+        jyx = F["jy"][ix, iz]/Jnorm
 
         rows.append((t, psi, F["x"][ix]/p["L"], F["x"][io]/p["L"],
                      eyx, hallx, hallcurlx, jyx, jy_curl_err))
-        last = (F, Ay, Hall_raw, Hall_curl, ix, io, iz, t, Jcy)
+        last = (F, Ay, Hall_dep, Hall_curl, ix, io, iz, t, Jcy)
 
         if ipf % 25 == 0 or ipf == len(files):
-            print(f"  analyzed {ipf}/{len(files)}, t/tau_A={t:.3f}, Psi_rec={psi:.4e}, "
-                  f"Jy-vs-curl relRMS={jy_curl_err:.3e}")
+            print(f"  analyzed {ipf}/{len(files)}, t/tau_A={t:.3f}, "
+                  f"Psi_rec={psi:.4e}, Jy-vs-curl relRMS={jy_curl_err:.3e}")
 
     rows = np.asarray(rows)
-    np.savetxt(
-        f"reconnection_ishizawa_history_ppc{args.ppc}.txt", rows,
-        header=("t/tauA Psi_rec/(B0L) x_X/L x_O/L Ey_X/(vAB0) "
-                "Hall_raw_X/(vAB0) Hall_curl_X/(vAB0) Jy_X/J0 JyCurl_relRMS")
-    )
+    np.savetxt(f"reconnection_ishizawa_history_ppc{args.ppc}.txt", rows,
+               header=("t/tauA Psi_rec/(B0L) x_X/L x_O/L Ey_X/(vAB0) "
+                       "Hall_dep_X/(vAB0) Hall_curl_X/(vAB0) Jy_X/J0 JyCurl_relRMS"))
 
-    fig, ax = plt.subplots(figsize=(8,5))
-    ax.semilogy(rows[:,0], np.maximum(rows[:,1],1e-12), "o-", ms=3)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.semilogy(rows[:,0], np.maximum(rows[:,1], 1e-12), "o-", ms=3)
     ax.set_xlabel(r"$t/\tau_A$")
     ax.set_ylabel(r"$|A_y(O)-A_y(X)|/(B_0L)$")
     ax.grid(alpha=0.25)
@@ -297,9 +334,9 @@ def main():
     fig.savefig(f"reconnection_flux_history_ppc{args.ppc}.png", dpi=200)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(8,5))
+    fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(rows[:,0], rows[:,4], "o-", ms=3, label=r"$E_y(X)$")
-    ax.plot(rows[:,0], rows[:,5], "s-", ms=3, label=r"Hall from deposited $J$")
+    ax.plot(rows[:,0], rows[:,5], "s-", ms=3, label="Hall from deposited J")
     ax.plot(rows[:,0], rows[:,6], "^-", ms=3, label=r"Hall from $\nabla\times B/\mu_0$")
     ax.set_xlabel(r"$t/\tau_A$")
     ax.set_ylabel(r"normalized by $v_AB_0$")
@@ -309,13 +346,13 @@ def main():
     fig.savefig(f"reconnection_xpoint_fields_ppc{args.ppc}.png", dpi=200)
     plt.close(fig)
 
-    F, Ay, Hall_raw, Hall_curl, ix, io, iz, tf, Jcy = last
+    F, Ay, Hall_dep, Hall_curl, ix, io, iz, tf, Jcy = last
     X, Z = np.meshgrid(F["x"]/p["L"], F["z"]/p["L"], indexing="ij")
-    J0 = p["B0"]/(p["mu0"]*p["L"])
+    Jnorm = p["B0"]/(p["mu0"]*p["L"])
     E0 = p["vA"]*p["B0"]
 
-    fig, ax = plt.subplots(figsize=(9,5))
-    pcm = ax.pcolormesh(X, Z, F["jy"]/J0, shading="auto")
+    fig, ax = plt.subplots(figsize=(9, 5))
+    pcm = ax.pcolormesh(X, Z, F["jy"]/Jnorm, shading="auto")
     An = Ay/(p["B0"]*p["L"])
     levels = np.linspace(np.nanmin(An), np.nanmax(An), 25)
     ax.contour(X, Z, An, levels=levels, linewidths=0.5, colors="k", alpha=0.45)
@@ -331,10 +368,10 @@ def main():
     plt.close(fig)
 
     zz = F["z"]/p["L"]
-    fig, ax = plt.subplots(figsize=(7,5))
-    ax.plot(zz, F["jy"][ix,:]/J0, label="deposited/native $J_y$")
-    ax.plot(zz, Jcy[ix,:]/J0, "--", label=r"$(\nabla\times B)_y/\mu_0$")
-    for s in (-1,1):
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.plot(zz, F["jy"][ix,:]/Jnorm, label="deposited $J_y$")
+    ax.plot(zz, Jcy[ix,:]/Jnorm, "--", label=r"$(\nabla\times B)_y/\mu_0$")
+    for s in (-1, 1):
         ax.axvline(s*p["lme"]/p["L"], ls=":", lw=1)
         ax.axvline(s*p["lmi"]/p["L"], ls="--", lw=1)
     ax.set_xlabel(r"$z/L$")
@@ -346,12 +383,12 @@ def main():
     fig.savefig(f"reconnection_final_current_profile_ppc{args.ppc}.png", dpi=200)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(7,5))
+    fig, ax = plt.subplots(figsize=(7, 5))
     ax.plot(zz, F["Ey"][ix,:]/E0, label=r"$E_y$")
-    ax.plot(zz, Hall_raw[ix,:]/E0, label=r"$(J\times B)_y/(en_i)$: deposited $J$")
+    ax.plot(zz, Hall_dep[ix,:]/E0, label="Hall: deposited J")
     ax.plot(zz, Hall_curl[ix,:]/E0, "--", label=r"Hall: $\nabla\times B/\mu_0$")
     ax.axhline(0.0, lw=0.8)
-    for s in (-1,1):
+    for s in (-1, 1):
         ax.axvline(s*p["lmi"]/p["L"], ls="--", lw=1)
     ax.set_xlabel(r"$z/L$")
     ax.set_ylabel(r"normalized by $v_AB_0$")
@@ -362,7 +399,7 @@ def main():
     fig.savefig(f"reconnection_final_hall_profile_ppc{args.ppc}.png", dpi=200)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(9,5))
+    fig, ax = plt.subplots(figsize=(9, 5))
     pcm = ax.pcolormesh(X, Z, F["By"]/p["B0"], shading="auto")
     fig.colorbar(pcm, ax=ax, label=r"$B_y/B_0$")
     ax.plot(F["x"][ix]/p["L"], F["z"][iz]/p["L"], "kx", ms=8, mew=2)
@@ -377,12 +414,14 @@ def main():
     with open(f"reconnection_ishizawa_summary_ppc{args.ppc}.txt", "w") as f:
         f.write("Ishizawa-inspired field/topology summary\n")
         f.write("=======================================\n\n")
-        f.write(f"yt current metadata units = {F['j_units']}\n")
-        f.write("Current arrays were read as native WarpX mesh values.\n")
+        f.write(f"yt current metadata units = {F0['j_units']}\n")
+        f.write(f"yt rho_ions metadata unit = {F0['rho_i_units']}\n")
+        f.write(f"rho native scale to C/m^3 = {rho_scale:.8e} ({rho_note})\n")
+        f.write(f"J native scale to A/m^2 = {j_scale:.8e}\n")
         f.write(f"final t/tau_A = {rows[-1,0]:.8f}\n")
         f.write(f"final Psi_rec/(B0 L) = {rows[-1,1]:.8e}\n")
         f.write(f"final Ey_X/(vA B0) = {rows[-1,4]:.8e}\n")
-        f.write(f"final Hall_raw_X/(vA B0) = {rows[-1,5]:.8e}\n")
+        f.write(f"final Hall_dep_X/(vA B0) = {rows[-1,5]:.8e}\n")
         f.write(f"final Hall_curl_X/(vA B0) = {rows[-1,6]:.8e}\n")
         f.write(f"final Jy_X/J0 = {rows[-1,7]:.8e}\n")
         f.write(f"final Jy-vs-curl relative RMS in |z|<=L = {rows[-1,8]:.8e}\n\n")
