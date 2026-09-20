@@ -131,3 +131,32 @@ paper's quasi-steady structure:
 
 Particle-rich steady snapshots are therefore mandatory.  Mesh fields alone
 cannot reproduce the pressure-tensor decomposition in Figs. 3 and 4.
+
+
+## Initial div(B) projection and Silver-Mueller
+
+WarpX automatically enables the MLMG projection-based initial div(B) cleaner
+when a non-constant parsed external magnetic field is loaded with the Yee
+solver.  That projection solver currently accepts only periodic, PEC, PMC, or
+Neumann field boundaries and therefore aborts when Stage A uses
+`absorbing_silver_mueller`.
+
+For this Stage-A Harris field,
+
+```text
+Bx = B0*tanh(z/L)
+By = 0
+Bz = 0
+```
+
+the magnetic field is divergence-free because Bx has no x dependence and Bz
+has no z dependence.  Stage A therefore explicitly sets
+
+```text
+warpx.do_initial_div_cleaning = 0
+```
+
+instead of running the incompatible MLMG projection.  The full diagnostic now
+writes `divB`, and `analyze_ishizawa_open_equilibrium.py` reports the
+interior RMS div(B), normalized by `B0/L`.  This must remain small during the
+open-boundary pilot before Stage B is enabled.
