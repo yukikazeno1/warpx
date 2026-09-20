@@ -94,19 +94,37 @@ geometry.prob_hi =  0.5*lx   0.5*lz
 
 amr.n_cell = 512 512
 amr.max_level = 0
-amr.max_grid_size = 64
+# Four 256x256 boxes on one GPU: avoids the severe 64-box/GPU overhead seen
+# in the first open-boundary smoke test while retaining modest decomposition.
+amr.max_grid_size = 256
 amr.blocking_factor = 32
 
 ###############################################################################
 # Open-boundary pilot
 ###############################################################################
 
-# Native outgoing-wave field boundary and particle absorption on all four
-# physical sides.  Stage A intentionally has NO reinjection yet.
-boundary.field_lo = absorbing_silver_mueller absorbing_silver_mueller
-boundary.field_hi = absorbing_silver_mueller absorbing_silver_mueller
+# Mixed field boundary for the open-system pilot:
+#   x (paper downstream): Silver-Mueller outgoing-wave boundary
+#   z (paper upstream): controlled insulator boundary that preserves the
+#                       static Harris upstream Bx and (for Stage A) Ey=0.
+#
+# A Silver-Mueller boundary on z is NOT compatible with the nonzero static
+# tangential Harris field Bx ~= +/-B0 and launches a large EM transient.
+# The controlled z boundary is also the natural place to impose the Stage-B
+# reconnection drive Ey(t).
+boundary.field_lo = absorbing_silver_mueller pec_insulator
+boundary.field_hi = absorbing_silver_mueller pec_insulator
 boundary.particle_lo = absorbing absorbing
 boundary.particle_hi = absorbing absorbing
+
+# Make the complete z faces "insulator" regions and explicitly prescribe the
+# equilibrium tangential fields.  At z=-Lz/2, Bx~-B0; at z=+Lz/2, Bx~+B0.
+insulator.area_z_lo(x,y) = "1"
+insulator.area_z_hi(x,y) = "1"
+insulator.Bx_z_lo(x,y,t) = "-b0"
+insulator.Bx_z_hi(x,y,t) = "b0"
+insulator.Ey_z_lo(x,y,t) = "0.0"
+insulator.Ey_z_hi(x,y,t) = "0.0"
 
 ###############################################################################
 # PIC algorithms
