@@ -11,6 +11,9 @@ ishizawa_open_equilibrium_summary.txt
 ishizawa_open_equilibrium_history.txt
 ishizawa_open_equilibrium_history.png
 ishizawa_open_equilibrium_profiles.png
+
+divB is normalized by B0/L.  It is monitored because the initial MLMG
+projection cleaner is intentionally disabled for Silver-Mueller boundaries.
 """
 
 from __future__ import annotations
@@ -104,8 +107,13 @@ def load(path):
         level=0, left_edge=ds.domain_left_edge, dims=ds.domain_dimensions
     )
 
-    def fld(name, unit=None):
-        q = g[("boxlib", name)]
+    def fld(name, unit=None, required=True):
+        try:
+            q = g[("boxlib", name)]
+        except Exception:
+            if required:
+                raise
+            return None
         try:
             a = q.to_value(unit) if unit else q.to_ndarray()
         except Exception:
@@ -119,6 +127,7 @@ def load(path):
         jy=fld("jy","A/m**2"), rho=fld("rho","C/m**3"),
         rho_e=fld("rho_electrons","C/m**3"),
         rho_i=fld("rho_ions","C/m**3"),
+        divB=fld("divB","T/m",required=False),
     )
 
 
@@ -177,6 +186,10 @@ def main():
         E2 = F["Ex"]**2+F["Ey"]**2+F["Ez"]**2
         Bpert2 = F["By"]**2+F["Bz"]**2
         tci = P["wci"]*F["ds"].current_time.to_value("s")
+        divB_norm = (
+            rms(F["divB"][interior2d])/(P["B0"]/P["L"])
+            if F["divB"] is not None else np.nan
+        )
 
         row = dict(
             omega_ci_t=tci,
@@ -189,6 +202,7 @@ def main():
             Bpert_interior_rms_B0=rms(np.sqrt(Bpert2[interior2d]))/P["B0"],
             E_edge_rms_cB0=rms(np.sqrt(E2[edge2d]))/(C*P["B0"]),
             Bpert_edge_rms_B0=rms(np.sqrt(Bpert2[edge2d]))/P["B0"],
+            divB_interior_rms_norm=divB_norm,
             electron_inventory=np.sum(ne),
             ion_inventory=np.sum(ni),
         )
@@ -199,7 +213,8 @@ def main():
             f"{Path(fn).name}: wci*t={tci:.6f}  "
             f"Bx={row['Bx_interior_rms_B0']:.3e}  "
             f"Jy={row['Jy_interior_rms_J0']:.3e}  "
-            f"E={row['E_interior_rms_cB0']:.3e}"
+            f"E={row['E_interior_rms_cB0']:.3e}  "
+            f"divB={row['divB_interior_rms_norm']:.3e}"
         )
 
     keys = list(rows[0])
@@ -254,6 +269,7 @@ def main():
         ("neutrality_rms_n0","neutrality"),
         ("E_interior_rms_cB0","E interior"),
         ("Bpert_interior_rms_B0","Bpert interior"),
+        ("divB_interior_rms_norm","divB interior"),
     ]:
         axs[0].semilogy(
             t,np.maximum(arr[:,keys.index(key)],1e-30),
