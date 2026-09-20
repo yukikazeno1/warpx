@@ -1,0 +1,171 @@
+###############################################################################
+# Ishizawa & Horiuchi (2005) reproduction -- Stage A
+# Open-boundary Harris equilibrium pilot, no external drive yet.
+#
+# Paper-supported targets retained here:
+#   * 2D full electromagnetic PIC
+#   * mi/me = 800
+#   * 512 x 512 grid
+#   * omega_ce0 * dt = 0.02
+#   * no guide field
+#   * Harris-type initial equilibrium
+#
+# This is deliberately NOT the final driven steady-reconnection run.
+# Stage A isolates whether WarpX's native open field/particle boundaries can
+# preserve the Harris equilibrium before upstream injection and E x B drive
+# are enabled.
+#
+# Geometry mapping used throughout this branch:
+#   paper x       -> WarpX x
+#   paper y       -> WarpX z
+#   paper z (OOP) -> - WarpX y   (right-handed mapping)
+# Hence -Jz_paper corresponds to +Jy_WarpX.
+###############################################################################
+
+max_step = 100
+
+warpx.verbose = 1
+warpx.random_seed = 12345
+warpx.serialize_initial_conditions = 1
+warpx.use_filter = 0
+
+###############################################################################
+# Reference plasma parameters
+###############################################################################
+
+my_constants.n0 = 1.0e19
+my_constants.mi = 800.0*m_e
+
+my_constants.wpe = sqrt(n0*q_e**2/(epsilon0*m_e))
+my_constants.de  = clight/wpe
+my_constants.di  = sqrt(mi/m_e)*de
+
+# Predecessor Ishizawa/Horiuchi setups used omega_pe/omega_ce = 3.5.
+# The short 2005 PRL does not restate every normalization parameter, so this
+# remains an explicitly documented predecessor-derived choice.
+my_constants.wpe_wce = 3.5
+my_constants.wce0 = wpe/wpe_wce
+my_constants.b0 = m_e*wce0/q_e
+
+# Use Ti = Te and exact Harris pressure balance for this controlled pilot.
+my_constants.te = b0**2/(4.0*mu0*n0)
+my_constants.ti = te
+my_constants.uth_e = sqrt(te/(m_e*clight**2))
+my_constants.uth_i = sqrt(ti/(mi*clight**2))
+my_constants.lambda_D = sqrt(epsilon0*te/(n0*q_e**2))
+
+# The 2005 Letter does not explicitly state y_h.  Retain L=d_e from the
+# previous Ishizawa-scale pilot so the boundary change is isolated.
+my_constants.sheet_l = de
+
+# Paper: omega_ce0 * dt = 0.02.
+warpx.const_dt = 0.02/wce0
+
+###############################################################################
+# Harris equilibrium and current-carrying drifts
+###############################################################################
+
+my_constants.beta_de = 2.0*te/(q_e*b0*sheet_l*clight)
+my_constants.beta_di = 2.0*ti/(q_e*b0*sheet_l*clight)
+my_constants.ude = -beta_de/sqrt(1.0-beta_de**2)
+my_constants.udi =  beta_di/sqrt(1.0-beta_di**2)
+
+###############################################################################
+# Box and grid
+###############################################################################
+
+# Keep the same 64 d_e square used by the scale-isolation pilot:
+#   half-height = 32 d_e = 1.131 d_i
+#   dx = dz = d_e/8 on a 512 x 512 grid.
+# This is a Stage-A numerical design choice, not an asserted paper box size.
+my_constants.lx = 64.0*de
+my_constants.lz = 64.0*de
+
+geometry.dims = 2
+geometry.prob_lo = -0.5*lx  -0.5*lz
+geometry.prob_hi =  0.5*lx   0.5*lz
+
+amr.n_cell = 512 512
+amr.max_level = 0
+amr.max_grid_size = 64
+amr.blocking_factor = 32
+
+###############################################################################
+# Open-boundary pilot
+###############################################################################
+
+# Native outgoing-wave field boundary and particle absorption on all four
+# physical sides.  Stage A intentionally has NO reinjection yet.
+boundary.field_lo = absorbing_silver_mueller absorbing_silver_mueller
+boundary.field_hi = absorbing_silver_mueller absorbing_silver_mueller
+boundary.particle_lo = absorbing absorbing
+boundary.particle_hi = absorbing absorbing
+
+###############################################################################
+# PIC algorithms
+###############################################################################
+
+algo.maxwell_solver = yee
+algo.current_deposition = esirkepov
+algo.particle_pusher = boris
+algo.field_gathering = energy-conserving
+algo.particle_shape = 2
+
+###############################################################################
+# Initial fields: unseeded Harris sheet, no guide field
+###############################################################################
+
+warpx.B_ext_grid_init_style = parse_B_ext_grid_function
+warpx.Bx_external_grid_function(x,y,z) = "b0*tanh(z/sheet_l)"
+warpx.By_external_grid_function(x,y,z) = "0.0"
+warpx.Bz_external_grid_function(x,y,z) = "0.0"
+
+###############################################################################
+# Species: 49 PPC/species = 7 x 7
+#
+# 512^2 * 2 * 49 = 25,690,112 macro-particles, essentially the
+# 25.6 million total particles quoted in Ishizawa & Horiuchi (2005).
+# No uniform background is added in the Stage-A reference line because the
+# 2005 Letter does not state a background fraction.
+###############################################################################
+
+particles.species_names = electrons ions
+
+electrons.charge = -q_e
+electrons.mass   = m_e
+electrons.injection_style = NUniformPerCell
+electrons.num_particles_per_cell_each_dim = 7 7
+electrons.profile = parse_density_function
+electrons.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+electrons.momentum_distribution_type = gaussian
+electrons.ux_m = 0.0
+electrons.uy_m = ude
+electrons.uz_m = 0.0
+electrons.ux_th = uth_e
+electrons.uy_th = uth_e
+electrons.uz_th = uth_e
+
+ions.charge = q_e
+ions.mass   = mi
+ions.injection_style = NUniformPerCell
+ions.num_particles_per_cell_each_dim = 7 7
+ions.profile = parse_density_function
+ions.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+ions.momentum_distribution_type = gaussian
+ions.ux_m = 0.0
+ions.uy_m = udi
+ions.uz_m = 0.0
+ions.ux_th = uth_i
+ions.uy_th = uth_i
+ions.uz_th = uth_i
+
+###############################################################################
+# Mesh diagnostics.  The runner adds restart checkpoints.
+###############################################################################
+
+diagnostics.diags_names = diag1
+
+diag1.diag_type = Full
+diag1.intervals = 100
+diag1.write_species = 0
+diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
