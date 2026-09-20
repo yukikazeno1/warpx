@@ -160,3 +160,42 @@ instead of running the incompatible MLMG projection.  The full diagnostic now
 writes `divB`, and `analyze_ishizawa_open_equilibrium.py` reports the
 interior RMS div(B), normalized by `B0/L`.  This must remain small during the
 open-boundary pilot before Stage B is enabled.
+
+
+## Stage-A boundary revision after first smoke test
+
+The first Stage-A smoke test used Silver-Mueller field boundaries on both x and
+z.  Although the code ran and div(B) remained small, the interior equilibrium
+was strongly perturbed by 100 steps: Bx and Jy profile errors were several to
+ten percent and E_rms/(c B0) reached O(1e-2).
+
+This is expected because the upstream z faces carry a nonzero *tangential*
+static Harris field Bx ~= +/- B0, whereas a Silver-Mueller radiation boundary
+is designed for outgoing electromagnetic waves rather than for holding a DC
+tangential equilibrium field.
+
+The revised Stage A therefore uses:
+
+- x / downstream: `absorbing_silver_mueller`;
+- z / upstream: `pec_insulator`, with the whole face treated as insulator;
+- prescribed upstream tangential magnetic field
+  `Bx(z_lo)=-B0`, `Bx(z_hi)=+B0`;
+- Stage-A drive `Ey=0` on both upstream faces;
+- absorbing particle boundaries on all physical sides.
+
+This layout also prepares Stage B cleanly: the same upstream boundary can later
+replace `Ey=0` by a time-ramped reconnection drive without changing the
+downstream boundary implementation.
+
+The revised pilot also uses `amr.max_grid_size=256` (four boxes on one GPU)
+instead of 64, because the first smoke test showed a severe 64-box/GPU
+decomposition overhead.
+
+The controlled-upstream revision writes to a new run directory:
+
+```text
+runs_ishizawa_open_equilibrium/controlled_upstream_ppc49
+```
+
+so that checkpoints from the earlier all-Silver-Mueller pilot cannot be
+accidentally restarted.
