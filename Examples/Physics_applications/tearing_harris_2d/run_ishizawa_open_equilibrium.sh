@@ -58,7 +58,9 @@ if [[ ! -x "${WARPX_EXE}" ]]; then
     exit 1
 fi
 
-RUN_DIR="${SCRIPT_DIR}/runs_ishizawa_open_equilibrium/ppc${PPC}"
+# Keep the controlled-upstream revision separate from the earlier all-Silver-
+# Mueller pilot so an old incompatible checkpoint can never be auto-restarted.
+RUN_DIR="${SCRIPT_DIR}/runs_ishizawa_open_equilibrium/controlled_upstream_ppc${PPC}"
 INPUT_FILE="${RUN_DIR}/inputs_open_equilibrium"
 
 if [[ "${FORCE}" == "1" && -d "${RUN_DIR}" ]]; then
@@ -110,7 +112,8 @@ echo "Ishizawa 2005 Stage-A open-boundary equilibrium pilot"
 echo "mode                  : ${MODE}"
 echo "grid                  : 512 x 512"
 echo "box                   : 64 d_e x 64 d_e"
-echo "field BC              : absorbing_silver_mueller on x,z"
+echo "field BC x/downstream : absorbing_silver_mueller"
+echo "field BC z/upstream   : controlled pec_insulator (Bx=+/-B0, Ey=0)"
 echo "particle BC           : absorbing on x,z"
 echo "external drive        : OFF"
 echo "PPC/species           : ${PPC} (${DIMS})"
