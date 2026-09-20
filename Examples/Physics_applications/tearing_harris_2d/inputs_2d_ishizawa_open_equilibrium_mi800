@@ -29,6 +29,13 @@ warpx.random_seed = 12345
 warpx.serialize_initial_conditions = 1
 warpx.use_filter = 0
 
+# Parsed external B fields enable the MLMG projection div(B) cleaner by default.
+# That projection solver does not support absorbing_silver_mueller boundaries.
+# The Harris field below is analytically and discretely divergence-free in X-Z
+# (Bx depends only on z and Bz=0), so disable the incompatible initialization
+# projection and monitor divB directly in diagnostics instead.
+warpx.do_initial_div_cleaning = 0
+
 ###############################################################################
 # Reference plasma parameters
 ###############################################################################
@@ -168,4 +175,4 @@ diagnostics.diags_names = diag1
 diag1.diag_type = Full
 diag1.intervals = 100
 diag1.write_species = 0
-diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
+diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions divB
