@@ -161,27 +161,28 @@ def main():
         xmax = max(abs(x[0]),abs(x[-1]))
         zmax = max(abs(z[0]),abs(z[-1]))
 
-        interior2d = (
-            (np.abs(x[:,None]) <= args.interior_fraction*xmax) &
-            (np.abs(z[None,:]) <= args.interior_fraction*zmax)
-        )
+        interior_x = np.abs(x) <= args.interior_fraction*xmax
         interior_z = np.abs(z) <= args.interior_fraction*zmax
+        interior2d = interior_x[:,None] & interior_z[None,:]
         edge2d = ~interior2d
 
         Bxref = P["B0"]*np.tanh(z/P["L"])
         Jyref = P["J0"]/np.cosh(z/P["L"])**2
-        bxm = np.mean(F["Bx"],axis=0)
+
+        # Do not let downstream x-boundary layers contaminate the nominal
+        # "interior" 1-D Harris profiles: average only over interior x.
+        bxm = np.mean(F["Bx"][interior_x,:],axis=0)
 
         dBx_dz = np.gradient(F["Bx"],F["dz"],axis=1,edge_order=2)
         dBz_dx = np.gradient(F["Bz"],F["dx"],axis=0,edge_order=2)
         jycurl = (dBx_dz-dBz_dx)/MU0
-        jym = np.mean(jycurl,axis=0)
+        jym = np.mean(jycurl[interior_x,:],axis=0)
 
         ne = -F["rho_e"]/QE
         ni = F["rho_i"]/QE
         ntot0 = P["n0"]/np.cosh(z/P["L"])**2
-        ne_m = np.mean(ne,axis=0)
-        ni_m = np.mean(ni,axis=0)
+        ne_m = np.mean(ne[interior_x,:],axis=0)
+        ni_m = np.mean(ni[interior_x,:],axis=0)
 
         E2 = F["Ex"]**2+F["Ey"]**2+F["Ez"]**2
         Bpert2 = F["By"]**2+F["Bz"]**2
@@ -213,7 +214,8 @@ def main():
             f"{Path(fn).name}: wci*t={tci:.6f}  "
             f"Bx={row['Bx_interior_rms_B0']:.3e}  "
             f"Jy={row['Jy_interior_rms_J0']:.3e}  "
-            f"E={row['E_interior_rms_cB0']:.3e}  "
+            f"Eint={row['E_interior_rms_cB0']:.3e}  "
+            f"Eedge={row['E_edge_rms_cB0']:.3e}  "
             f"divB={row['divB_interior_rms_norm']:.3e}"
         )
 
