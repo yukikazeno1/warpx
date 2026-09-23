@@ -77,3 +77,8 @@ WARP.md
 .DS_Store
 .AppleDouble
 .LSOverride
+*.gif
+**/diags
+*.png
+*.txt
+*.log

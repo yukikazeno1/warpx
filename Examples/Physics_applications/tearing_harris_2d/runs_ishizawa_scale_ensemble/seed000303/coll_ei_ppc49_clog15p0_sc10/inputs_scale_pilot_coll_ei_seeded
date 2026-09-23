@@ -1,0 +1,204 @@
+###############################################################################
+# Ishizawa-scale Harris-sheet pilot for WarpX
+#
+# Purpose
+# -------
+# Test whether the very small box used by the earlier tearing pilot was the
+# dominant limitation.  This case moves the spatial and particle-count scales
+# much closer to Ishizawa & Horiuchi (2005), while deliberately retaining the
+# simple closed/periodic WarpX boundary model for the first size-isolation test.
+#
+# IMPORTANT: this is NOT yet a reproduction of the driven open system in the
+# paper.  Ishizawa uses an open square domain, an upstream E x B drive and a
+# freely transmitting downstream boundary.  Those are a separate next stage.
+#
+# Geometry here: X-Z plane; current Y; reconnecting field Bx(z).
+###############################################################################
+
+max_step = 40000
+
+warpx.verbose = 1
+warpx.random_seed = 12345
+warpx.serialize_initial_conditions = 1
+warpx.use_filter = 0
+
+###############################################################################
+# Reference plasma parameters
+###############################################################################
+
+my_constants.n0 = 1.0e19
+my_constants.mi = 800.0*m_e
+
+my_constants.wpe = sqrt(n0*q_e**2/(epsilon0*m_e))
+my_constants.de  = clight/wpe
+my_constants.di  = sqrt(mi/m_e)*de
+
+# Predecessor Ishizawa simulations explicitly use omega_pe/omega_ce = 3.5.
+# The 2005 PRL keeps mi/me=800.  We use the same frequency ratio here.
+my_constants.wpe_wce = 3.5
+my_constants.wce0 = wpe/wpe_wce
+my_constants.b0 = m_e*wce0/q_e
+
+# Ishizawa's predecessor setup states Ti0 = Te0.  Enforce Harris pressure
+# balance B0^2/(2 mu0) = n0 (Te + Ti) with Te=Ti.
+my_constants.te = b0**2/(4.0*mu0*n0)
+my_constants.ti = te
+my_constants.uth_e = sqrt(te/(m_e*clight**2))
+my_constants.uth_i = sqrt(ti/(mi*clight**2))
+my_constants.lambda_D = sqrt(epsilon0*te/(n0*q_e**2))
+
+# The exact 2005 paper does not state y_h in the short PRL.  Keep L=d_e for
+# this scale pilot so the sheet itself remains well resolved.  Do not treat
+# this choice as an exact reconstruction of Ishizawa's y_h.
+my_constants.sheet_l = de
+
+# Ishizawa: omega_ce * dt = 0.02.  WarpX supports an exact constant timestep.
+warpx.const_dt = 0.02/wce0
+
+###############################################################################
+# Harris equilibrium and drift
+###############################################################################
+
+# For a two-species Harris sheet, each species drift is set consistently with
+# its temperature and the total Ampere current.
+my_constants.beta_de = 2.0*te/(q_e*b0*sheet_l*clight)
+my_constants.beta_di = 2.0*ti/(q_e*b0*sheet_l*clight)
+my_constants.ude = -beta_de/sqrt(1.0-beta_de**2)
+my_constants.udi =  beta_di/sqrt(1.0-beta_di**2)
+
+###############################################################################
+# Box and grid
+###############################################################################
+
+# Square 64 d_e box.  For mi/me=800, half-height = 32 d_e = 1.13 d_i.
+# With the above Ishizawa-like thermodynamics, lambda_D = d_e/7, hence
+# dx = dz = d_e/8 = 0.875 lambda_D on a 512x512 grid.
+my_constants.lx = 64.0*de
+my_constants.lz = 64.0*de
+
+geometry.dims = 2
+geometry.prob_lo = -0.5*lx  -0.5*lz
+geometry.prob_hi =  0.5*lx   0.5*lz
+
+amr.n_cell = 512 512
+amr.max_level = 0
+amr.max_grid_size = 64
+amr.blocking_factor = 32
+
+###############################################################################
+# Boundary conditions -- size-isolation pilot only
+###############################################################################
+
+# These are intentionally the same simple boundary types used in the earlier
+# tearing pilot.  They isolate the effect of enlarging the domain.  They are
+# NOT equivalent to Ishizawa's open driven boundaries.
+boundary.field_lo = periodic pec
+boundary.field_hi = periodic pec
+boundary.particle_lo = periodic reflecting
+boundary.particle_hi = periodic reflecting
+
+###############################################################################
+# PIC algorithms
+###############################################################################
+
+algo.maxwell_solver = yee
+algo.current_deposition = esirkepov
+algo.particle_pusher = boris
+algo.field_gathering = energy-conserving
+algo.particle_shape = 2
+
+###############################################################################
+# Initial field: unseeded Harris sheet
+###############################################################################
+
+warpx.B_ext_grid_init_style = parse_B_ext_grid_function
+warpx.Bx_external_grid_function(x,y,z) = "b0*tanh(z/sheet_l)"
+warpx.By_external_grid_function(x,y,z) = "0.0"
+warpx.Bz_external_grid_function(x,y,z) = "0.0"
+
+###############################################################################
+# Species: default 49 PPC/species = 7x7
+# 512^2 * 2 species * 49 = 25,690,112 macroparticles, essentially the
+# 25.6 million total particles quoted by Ishizawa & Horiuchi (2005).
+###############################################################################
+
+particles.species_names = electrons ions
+
+electrons.charge = -q_e
+electrons.mass   = m_e
+electrons.injection_style = NUniformPerCell
+electrons.num_particles_per_cell_each_dim = 7 7
+electrons.profile = parse_density_function
+electrons.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+electrons.momentum_distribution_type = gaussian
+electrons.ux_m = 0.0
+electrons.uy_m = ude
+electrons.uz_m = 0.0
+electrons.ux_th = uth_e
+electrons.uy_th = uth_e
+electrons.uz_th = uth_e
+
+ions.charge = q_e
+ions.mass   = mi
+ions.injection_style = NUniformPerCell
+ions.num_particles_per_cell_each_dim = 7 7
+ions.profile = parse_density_function
+ions.density_function(x,y,z) = "n0/(cosh(z/sheet_l)**2)"
+ions.momentum_distribution_type = gaussian
+ions.ux_m = 0.0
+ions.uy_m = udi
+ions.uz_m = 0.0
+ions.ux_th = uth_i
+ions.uy_th = uth_i
+ions.uz_th = uth_i
+
+###############################################################################
+# Coulomb collisions
+#
+# First controlled collisional variant: electron-ion collisions only.
+# This is the collision channel that directly relaxes the relative e-i drift
+# and therefore produces the collisional/resistive contribution to Ohm's law.
+#
+# Pairwise Coulomb is the default collision type in WarpX, but it is written
+# explicitly here for clarity.
+#
+# IMPORTANT for the current WarpX branch:
+#   use ndt_supercycle or ndt_subcycle; the legacy parameter "ndt" is rejected.
+#
+# A fixed Coulomb logarithm is used first so that the collisionless/collisional
+# comparison changes only by enabling the collision operator.
+###############################################################################
+
+collisions.collision_names = collision_ei
+
+collision_ei.type = pairwisecoulomb
+collision_ei.species = electrons ions
+collision_ei.CoulombLog = 15.0
+
+# Run the collision operator once every 10 PIC steps, with the collision
+# operator integrating over 10*dt on each call.  This reduces collision cost;
+# it does NOT multiply the physical collision frequency.
+collision_ei.ndt_supercycle = 10
+
+###############################################################################
+# Mesh diagnostics only.  The runner changes cadence by stage and adds a
+# checkpoint diagnostic.  Particle-rich diagnostics should be generated only
+# at selected checkpoints, not continuously.
+###############################################################################
+
+diagnostics.diags_names = diag1 chk
+
+diag1.diag_type = Full
+diag1.intervals = 1000
+diag1.write_species = 0
+diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
+
+###############################################################################
+# Paired-ensemble random seed and checkpoint diagnostic
+###############################################################################
+warpx.random_seed = 303
+
+chk.intervals = 10000
+chk.diag_type = Full
+chk.format = checkpoint
+chk.dump_last_timestep = 1
