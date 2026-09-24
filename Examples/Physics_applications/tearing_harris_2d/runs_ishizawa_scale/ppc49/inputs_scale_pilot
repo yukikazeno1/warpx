@@ -15,7 +15,7 @@
 # Geometry here: X-Z plane; current Y; reconnecting field Bx(z).
 ###############################################################################
 
-max_step = 100000
+max_step = 160000
 
 warpx.verbose = 1
 warpx.random_seed = 12345
@@ -168,7 +168,7 @@ diag1.fields_to_plot = Ex Ey Ez Bx By Bz jx jy jz rho rho_electrons rho_ions
 ###############################################################################
 # Restart checkpoint diagnostic added by run_ishizawa_scale_pilot.sh
 ###############################################################################
-chk.intervals = 10000
+chk.intervals = 15000
 chk.diag_type = Full
 chk.format = checkpoint
 chk.dump_last_timestep = 1
