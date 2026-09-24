@@ -312,7 +312,7 @@ def panel4(phases, key, zmask, P, title, cbar_label, symmetric=False,
     for ax,D,v in zip(axs,phases,vals):
         X,Z=np.meshgrid(D["x"]/P["de"],D["z"][zmask]/P["de"],indexing="ij")
         p=ax.pcolormesh(X,Z,v,shading="auto",vmin=vmin,vmax=vmax)
-        ax.set_title(D["label"]+fr"\n$\omega_{{ci}}t={D['t']:.3f}$")
+        ax.set_title(D["label"]+"\n"+fr"$\omega_{{ci}}t={D['t']:.3f}$")
         ax.set_xlabel(r"$x/d_e$")
         ax.grid(alpha=.12)
     axs[0].set_ylabel(r"$z/d_e$")
@@ -411,7 +411,7 @@ def main():
         X,Z=np.meshgrid(D["x"]/P["de"],D["z"][zmask]/P["de"],indexing="ij")
         p0=axs[0,col].pcolormesh(X,Z,vals_i[col],shading="auto",vmin=lo,vmax=hi)
         axs[1,col].pcolormesh(X,Z,vals_e[col],shading="auto",vmin=lo,vmax=hi)
-        axs[0,col].set_title(D["label"]+fr"\n$\omega_{{ci}}t={D['t']:.3f}$")
+        axs[0,col].set_title(D["label"]+"\n"+fr"$\omega_{{ci}}t={D['t']:.3f}$")
         axs[1,col].set_xlabel(r"$x/d_e$")
     axs[0,0].set_ylabel(r"ions: $z/d_e$")
     axs[1,0].set_ylabel(r"electrons: $z/d_e$")
@@ -441,7 +441,7 @@ def main():
         ax.plot(z,np.mean(D["FL_z"][xm,:],axis=0)/norm,label="JxB")
         ax.axhline(0,lw=.8)
         ax.set_xlim(-args.zoom_z_de,args.zoom_z_de)
-        ax.set_title(D["label"]+fr"\n$\omega_{{ci}}t={D['t']:.3f}$")
+        ax.set_title(D["label"]+"\n"+fr"$\omega_{{ci}}t={D['t']:.3f}$")
         ax.set_xlabel(r"$z/d_e$")
         ax.grid(alpha=.2)
     axs[0].set_ylabel(r"vertical magnetic force / $(J_0B_0)$")
@@ -471,7 +471,7 @@ def main():
             X,Z=np.meshgrid(D["x"]/P["de"],D["z"][zmask]/P["de"],indexing="ij")
             p=axs[r,c].pcolormesh(X,Z,v,shading="auto",vmin=vmin,vmax=vmax)
             if r==0:
-                axs[r,c].set_title(D["label"]+fr"\n$\omega_{{ci}}t={D['t']:.3f}$")
+                axs[r,c].set_title(D["label"]+"\n"+fr"$\omega_{{ci}}t={D['t']:.3f}$")
             if r==3:
                 axs[r,c].set_xlabel(r"$x/d_e$")
             if c==0:
