@@ -287,9 +287,13 @@ def phase_metrics(D, F, P, core_z_de, force_x_halfwidth_de):
     Fp = np.nanmean(np.abs(D["Fp_z"][box]))/normF
     FL = np.nanmean(np.abs(D["FL_z"][box]))/normF
 
+    # IMPORTANT: do not use the keys "ni" or "ne" here.  process_phase()
+    # already stores the full 2-D number-density arrays under D["ni"] and
+    # D["ne"].  Reusing those names would overwrite the arrays with scalars
+    # when main() calls D.update(M), which later breaks the density panels.
     return dict(
         UBz=UBz,UBtot=UBtot,UE=UE,PJE=PJE,jyp=jyp,
-        ni=nim,ne=nem,Ft=Ft,Fp=Fp,FL=FL,
+        mean_ni=nim,mean_ne=nem,Ft=Ft,Fp=Fp,FL=FL,
     )
 
 
@@ -357,7 +361,7 @@ def main():
         rows.append([
             step,D["t"],D["psi"],D["width"],D["xO"]/P["de"],
             M["UBz"],M["UBtot"],M["UE"],M["PJE"],M["jyp"],
-            M["ni"],M["ne"],M["Ft"],M["Fp"],M["FL"],
+            M["mean_ni"],M["mean_ne"],M["Ft"],M["Fp"],M["FL"],
         ])
 
     np.savetxt(
