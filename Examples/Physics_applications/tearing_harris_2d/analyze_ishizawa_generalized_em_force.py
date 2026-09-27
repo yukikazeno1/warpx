@@ -183,8 +183,10 @@ def main():
 
     stats={}
     fits={}
+    harmonics={}
     for name,y in series.items():
         pred,A,phi,R,c=harmonic_fit(t,y,args.period)
+        harmonics[name]=c[2]*np.sin(om*u)+c[3]*np.cos(om*u)
         slope,intercept,Rlin=linfit(q,y)
         # residual phase relative to the ideal restoring relation y ~ -q
         dphi=wrap(phi-phiq-np.pi)
@@ -194,18 +196,30 @@ def main():
                          dphi=dphi,T_signed=T_signed)
         fits[name]=pred
 
-    corr_em=float(np.corrcoef(ddq_fit,fits["EM"])[0,1])
+    em_h=harmonics["EM"]
+    corr_em=float(np.corrcoef(ddq_fit,em_h)[0,1])
     rms_ref=float(np.sqrt(np.mean(ddq_fit**2)))
-    mismatch=float(np.sqrt(np.mean((ddq_fit-fits["EM"])**2))/rms_ref)
+    mismatch=float(np.sqrt(np.mean((ddq_fit-em_h)**2))/rms_ref)
+
+    # The force that would still be required to reproduce the observed
+    # breathing acceleration after subtracting the measured EM contribution.
+    # This is a diagnostic residual, not yet an identified physical force.
+    areq=ddq_fit-em_h
+    areq_fit,Areq,phireq,Rreq,creq=harmonic_fit(t,areq,args.period)
+    req_slope,req_intercept,req_Rlin=linfit(q,areq)
+    req_phase_resid=wrap(phireq-phiq-np.pi)
+    req_T=2*np.pi/np.sqrt(-req_slope) if req_slope<0 else np.nan
+    required_total_slope=-(2*np.pi/args.period)**2
 
     np.savetxt(
         "ishizawa_generalized_em_force_history.txt",
         np.column_stack([
-            step,t,psi,width,q,I,Qp,Qt,Ql,Qe,Qem,ap,at,al,ae,aem,ddq_fit
+            step,t,psi,width,q,I,Qp,Qt,Ql,Qe,Qem,ap,at,al,ae,aem,ddq_fit,areq
         ]),
         header=(
             "step omega_ci_t Psi width_de q I Q_Pmag Q_tension Q_JxB Q_rhoE "
-            "Q_EM a_Pmag a_tension a_JxB a_rhoE a_EM measured_ddq_harmonic"
+            "Q_EM a_Pmag a_tension a_JxB a_rhoE a_EM measured_ddq_harmonic "
+            "required_nonEM_acceleration"
         )
     )
 
@@ -218,15 +232,14 @@ def main():
 
     axs[1].plot(t,ddq_fit,lw=2,label="measured harmonic acceleration")
     for name in ["JxB","rhoE","EM"]:
-        y=fits[name]-np.mean(fits[name])
-        axs[1].plot(t,y,label=name)
+        axs[1].plot(t,harmonics[name],label=name)
+    axs[1].plot(t,areq,"--",lw=2,label="required non-EM residual")
     axs[1].axhline(0,lw=.7)
     axs[1].set_ylabel("demeaned acceleration")
     axs[1].legend(fontsize=8)
 
     for name in ["Pmag","tension","JxB"]:
-        y=fits[name]-np.mean(fits[name])
-        axs[2].plot(t,y,label=name)
+        axs[2].plot(t,harmonics[name],label=name)
     axs[2].axhline(0,lw=.7)
     axs[2].set_ylabel("magnetic components")
     axs[2].set_xlabel(r"$\omega_{ci}t$")
@@ -249,6 +262,12 @@ def main():
         ax.axhline(0,lw=.7); ax.axvline(0,lw=.7)
         ax.grid(alpha=.25); ax.legend(fontsize=8)
         ax.set_xlabel("q")
+    # Overlay the dynamically required non-EM residual on the final panel.
+    axs[2].scatter(q,areq,s=22,label="required non-EM residual")
+    xx=np.linspace(q.min(),q.max(),200)
+    axs[2].plot(xx,req_slope*xx+req_intercept,"--",
+                label=f"required residual: slope={req_slope:.1f}")
+    axs[2].legend(fontsize=8)
     axs[0].set_ylabel("demeaned generalized acceleration")
     fig.suptitle("Force-displacement slopes: restoring requires negative slope")
     fig.tight_layout()
@@ -275,7 +294,16 @@ def main():
             )
         f.write("\n")
         f.write(f"corr(measured harmonic acceleration, total EM harmonic) = {corr_em:.8f}\n")
-        f.write(f"relative RMS total-EM acceleration mismatch = {mismatch:.8e}\n\n")
+        f.write(f"relative RMS pure-harmonic total-EM acceleration mismatch = {mismatch:.8e}\n\n")
+        f.write("Required non-EM residual (measured acceleration - EM harmonic)\n")
+        f.write("--------------------------------------------------------------\n")
+        f.write(f"ideal total restoring slope from measured period = {required_total_slope:.8e}\n")
+        f.write(f"residual harmonic amplitude = {Areq:.8e}\n")
+        f.write(f"residual harmonic R2 = {Rreq:.8f}\n")
+        f.write(f"residual phase relative to ideal restoring = {req_phase_resid:.8f} rad\n")
+        f.write(f"residual slope versus q = {req_slope:.8e}\n")
+        f.write(f"residual slope R2 = {req_Rlin:.8f}\n")
+        f.write(f"standalone period from negative residual slope = {req_T:.8f}\n\n")
         f.write("Interpretation:\n")
         f.write("  restoring => negative slope and phase_resid close to 0.\n")
         f.write("  positive slope => anti-restoring contribution for this width coordinate.\n")
