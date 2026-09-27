@@ -205,9 +205,11 @@ def main():
 
     # Compare magnetic acceleration to measured harmonic acceleration.
     corr_raw=float(np.corrcoef(ddq,amag)[0,1])
-    corr_harm=float(np.corrcoef(ddq_fit,amag_fit)[0,1])
-    rms_ref=float(np.sqrt(np.mean(ddq_fit**2)))
-    rel_harm=float(np.sqrt(np.mean((ddq_fit-amag_fit)**2))/rms_ref)
+    ddq_h = ddq_fit - np.mean(ddq_fit)
+    amag_h = amag_fit - np.mean(amag_fit)
+    corr_harm=float(np.corrcoef(ddq_h,amag_h)[0,1])
+    rms_ref=float(np.sqrt(np.mean(ddq_h**2)))
+    rel_harm=float(np.sqrt(np.mean((ddq_h-amag_h)**2))/rms_ref)
 
     np.savetxt(
         "ishizawa_restoring_oscillator_history.txt",
@@ -229,15 +231,15 @@ def main():
     axs[0].legend(fontsize=8)
 
     axs[1].plot(t,ddq,label=r"numeric $d^2q/d\tau^2$",alpha=.55)
-    axs[1].plot(t,ddq_fit,lw=2,label="measured harmonic acceleration")
-    axs[1].plot(t,amag_fit,lw=2,label=r"magnetic $Q_L/I/\omega_{ci}^2$")
+    axs[1].plot(t,ddq_h,lw=2,label="measured harmonic acceleration")
+    axs[1].plot(t,amag_h,lw=2,label=r"demeaned magnetic $Q_L/I/\omega_{ci}^2$")
     axs[1].axhline(0,lw=.7)
     axs[1].set_ylabel("dimensionless acceleration")
     axs[1].legend(fontsize=8)
 
-    axs[2].plot(t,ap_fit,label="magnetic-pressure contribution")
-    axs[2].plot(t,at_fit,label="tension contribution")
-    axs[2].plot(t,amag_fit,lw=2,label="sum Lorentz")
+    axs[2].plot(t,ap_fit-np.mean(ap_fit),label="magnetic-pressure contribution")
+    axs[2].plot(t,at_fit-np.mean(at_fit),label="tension contribution")
+    axs[2].plot(t,amag_h,lw=2,label="sum Lorentz")
     axs[2].axhline(0,lw=.7)
     axs[2].set_xlabel(r"$\omega_{ci}t$")
     axs[2].set_ylabel(r"$Q/I/\omega_{ci}^2$")
@@ -295,7 +297,7 @@ def main():
         f.write("--------------------\n")
         f.write(f"corr(raw ddq, raw magnetic acceleration) = {corr_raw:.8f}\n")
         f.write(f"corr(harmonic ddq, harmonic magnetic acceleration) = {corr_harm:.8f}\n")
-        f.write(f"relative RMS harmonic acceleration mismatch = {rel_harm:.8e}\n\n")
+        f.write(f"relative RMS demeaned-harmonic acceleration mismatch = {rel_harm:.8e}\n\n")
 
         f.write("Interpretation guide\n")
         f.write("--------------------\n")
