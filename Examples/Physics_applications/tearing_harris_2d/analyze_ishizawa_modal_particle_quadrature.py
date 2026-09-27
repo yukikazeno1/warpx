@@ -70,6 +70,12 @@ def parse_args():
     p.add_argument("--core-z-de",type=float,default=12.0)
     p.add_argument("--mode-density-cut",type=float,default=0.02)
     p.add_argument("--smooth-passes",type=int,default=2)
+    p.add_argument("--x-edge-taper-de",type=float,default=0.0,
+                   help="cosine taper width from each periodic-x boundary, in de; "
+                        "0 keeps the original untapered test function")
+    p.add_argument("--periodic-x-gradient",action="store_true",
+                   help="use a centered periodic derivative in x for grad(xi); "
+                        "recommended for the periodic-x domain")
     return p.parse_args()
 
 
@@ -235,13 +241,30 @@ def main():
     inside=np.abs(z)<zmax
     zenv[inside]=0.5*(1+np.cos(np.pi*z[inside]/zmax))
     env=dens_env*zenv[None,:]
+
+    if args.x_edge_taper_de > 0.0:
+        x=crossings[0]["M"]["x"]
+        xlo=crossings[0]["M"]["xlo"]
+        xhi=crossings[0]["M"]["xhi"]
+        w=args.x_edge_taper_de*P["de"]
+        dedge=np.minimum(x-xlo,xhi-x)
+        s=np.clip(dedge/max(w,np.finfo(float).tiny),0.0,1.0)
+        xenv=0.5*(1.0-np.cos(np.pi*s))
+        env*=xenv[:,None]
+
     xix*=env; xiz*=env
 
     dx=crossings[0]["M"]["dx"]; dz=crossings[0]["M"]["dz"]
+
+    def ddx(a):
+        if args.periodic_x_gradient:
+            return (np.roll(a,-1,axis=0)-np.roll(a,1,axis=0))/(2.0*dx)
+        return np.gradient(a,dx,axis=0,edge_order=2)
+
     grads=(
-        np.gradient(xix,dx,axis=0,edge_order=2),
+        ddx(xix),
         np.gradient(xix,dz,axis=1,edge_order=2),
-        np.gradient(xiz,dx,axis=0,edge_order=2),
+        ddx(xiz),
         np.gradient(xiz,dz,axis=1,edge_order=2),
     )
 
@@ -316,7 +339,9 @@ def main():
         f.write(f"electron kinetic harmonic R2 = {RkeR2:.8f}\n")
         f.write(f"mode crossings = {s_neg['step']} {s_pos['step']}\n")
         f.write(f"mode coarsen = {args.mode_coarsen}\n")
-        f.write(f"field coarsen = {args.field_coarsen}\n\n")
+        f.write(f"field coarsen = {args.field_coarsen}\n")
+        f.write(f"x edge taper / de = {args.x_edge_taper_de:.8f}\n")
+        f.write(f"periodic x gradient = {int(args.periodic_x_gradient)}\n\n")
 
         f.write("Breathing-frequency complex amplitudes\n")
         f.write("--------------------------------------\n")
@@ -398,6 +423,8 @@ def main():
     print(f"|RHS|/|LHS|               : {amp:.6f}")
     print(f"phase(RHS/LHS) [rad]      : {phase:+.6f}")
     print(f"raw FD relRMS             : {raw_rel:.6f}")
+    print(f"x edge taper / de         : {args.x_edge_taper_de:.3f}")
+    print(f"periodic x gradient       : {args.periodic_x_gradient}")
     print("Saved ishizawa_particle_quadrature_closure_summary.txt")
     print("Saved ishizawa_particle_quadrature_closure_history.txt")
     print("Saved ishizawa_particle_quadrature_closure_time.png")
