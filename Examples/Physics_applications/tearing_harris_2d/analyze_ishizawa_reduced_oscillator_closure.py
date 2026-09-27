@@ -206,8 +206,9 @@ def main():
         f.write(f"EM samples = {len(te)}\n")
         f.write(f"Pxx samples = {np.count_nonzero(mp)}\n\n")
 
-        f.write("Fit model: a = b + K q + C dq/dtau\n")
-        f.write("K<0 restoring; C<0 damping.\n\n")
+        f.write("Mixed time-domain regression: a = b + K q_raw + C dq_harm/dtau\n")
+        f.write("K<0 restoring; C<0 damping.  This block is diagnostic only;\n")
+        f.write("the primary breathing-frequency closure is the direct fundamental block below.\n\n")
 
         f.write("EM channels\n")
         f.write("-----------\n")
@@ -271,23 +272,43 @@ def main():
         f.write("This is a reduced closure.  A non-zero residual can contain P_xz/P_zz,\n")
         f.write("bulk stress, mode-shape evolution, and normalization differences.\n")
 
-    # Plot coefficient closure.
     labels=["required","EM","Pxx","EM+Pxx","missing"]
-    Ks=[Kreq,Kem,Kp,Knet,Kres]
-    Cs=[Creq,Cem,Cp,Cnet,Cres]
     x=np.arange(len(labels))
+
+    # Primary coefficient plot: direct breathing-frequency transfer coefficients.
+    Ks_h=[Kreq,Kem_h,Kp_h,Knet_h,Kmiss_h]
+    Cs_h=[Creq,Cem_h,Cp_h,Cnet_h,Cmiss_h]
     fig,axs=plt.subplots(2,1,figsize=(8,7),sharex=True)
-    axs[0].bar(x,Ks)
+    axs[0].bar(x,Ks_h)
     axs[0].axhline(0,lw=.8)
     axs[0].set_ylabel("K")
-    axs[0].set_title("Reduced breathing-mode stiffness closure")
-    axs[1].bar(x,Cs)
+    axs[0].set_title("Breathing-frequency complex closure coefficients")
+    axs[1].bar(x,Cs_h)
     axs[1].axhline(0,lw=.8)
     axs[1].set_ylabel("C")
     axs[1].set_xticks(x,labels,rotation=20)
     for ax in axs: ax.grid(axis="y",alpha=.25)
     fig.tight_layout()
     fig.savefig("ishizawa_reduced_oscillator_closure_coefficients.png",dpi=210)
+    plt.close(fig)
+
+    # Secondary plot: old mixed raw-q/harmonic-qdot regression, retained only
+    # as a sensitivity diagnostic.  It is not the preferred frequency-domain
+    # closure because raw q contains non-fundamental content.
+    Ks=[Kreq,Kem,Kp,Knet,Kres]
+    Cs=[Creq,Cem,Cp,Cnet,Cres]
+    fig,axs=plt.subplots(2,1,figsize=(8,7),sharex=True)
+    axs[0].bar(x,Ks)
+    axs[0].axhline(0,lw=.8)
+    axs[0].set_ylabel("K")
+    axs[0].set_title("Mixed time-domain regression coefficients (diagnostic only)")
+    axs[1].bar(x,Cs)
+    axs[1].axhline(0,lw=.8)
+    axs[1].set_ylabel("C")
+    axs[1].set_xticks(x,labels,rotation=20)
+    for ax in axs: ax.grid(axis="y",alpha=.25)
+    fig.tight_layout()
+    fig.savefig("ishizawa_reduced_oscillator_regression_coefficients.png",dpi=210)
     plt.close(fig)
 
     # Plot only breathing-frequency perturbations at the particle-rich phases.
@@ -337,6 +358,7 @@ def main():
 
     print("Saved ishizawa_reduced_oscillator_closure_summary.txt")
     print("Saved ishizawa_reduced_oscillator_closure_coefficients.png")
+    print("Saved ishizawa_reduced_oscillator_regression_coefficients.png")
     print("Saved ishizawa_reduced_oscillator_closure_time.png")
     print("Saved ishizawa_reduced_oscillator_closure_complex.png")
 
