@@ -15,13 +15,21 @@ from the *same macroparticles*:
     + p_z (v_x d_x xi_z + v_z d_z xi_z)
   ]
 
-For a fixed, periodic/tapered test displacement xi this weak-form identity is
+For a fixed test displacement xi on a finite x-z domain the exact weak-form
+identity contains the kinetic-momentum surface flux
 
-  dP_xi/dt = Q_EM + Q_kin.
+  dP_xi/dt = Q_EM + Q_kin - Q_surf,
+
+  Q_surf = integral_boundary xi_i Pi_ij n_j dS.
 
 With tau=omega_ci*t,
 
-  dP_xi/dtau = (Q_EM + Q_kin)/omega_ci.
+  dP_xi/dtau = (Q_EM + Q_kin - Q_surf)/omega_ci.
+
+Q_surf is estimated directly from the same macroparticles in thin boundary
+strips.  On periodic x, the right-minus-left contribution is a periodic-seam
+diagnostic: it should cancel for a truly periodic test function and particle
+stress.  The z contribution is the physical top-minus-bottom surface term.
 
 All particle-weight normalization cancels from the relative closure so long as
 the same WarpX particle weights are used consistently.  Grid E and B are
@@ -76,6 +84,9 @@ def parse_args():
     p.add_argument("--periodic-x-gradient",action="store_true",
                    help="use a centered periodic derivative in x for grad(xi); "
                         "recommended for the periodic-x domain")
+    p.add_argument("--boundary-strip-de",type=float,default=2.0,
+                   help="width of the particle strip used to estimate each "
+                        "weak-form surface flux, in de; default 2 de")
     return p.parse_args()
 
 
@@ -128,7 +139,8 @@ def interp_cc(a,xp,zp,x,z,periodic_x=True):
     )
 
 
-def particle_weak_terms(path,species,mass,charge,Mfield,Mmode,xix,xiz,grads):
+def particle_weak_terms(path,species,mass,charge,Mfield,Mmode,xix,xiz,grads,
+                        boundary_strip_de,de):
     ds=yt.load(path)
     ad=ds.all_data()
 
@@ -170,13 +182,52 @@ def particle_weak_terms(path,species,mass,charge,Mfield,Mmode,xix,xiz,grads):
         + pz*(vx*dzx + vz*dzz)
     ))
 
-    return float(Pxi),float(Qem),float(Qkin),int(len(w))
+    # Particle-strip estimator of the weak-form surface term
+    #
+    #   Q_surf = int_boundary xi_i Pi_ij n_j dS.
+    #
+    # A boundary strip of width h converts the particle volume sum to a
+    # surface-flux estimate by division by h.  Because exactly the same WarpX
+    # particle weights are used as in Pxi/Qkin, the otherwise unknown 2-D
+    # macro-particle normalization cancels in the relative closure.
+    h=float(boundary_strip_de)*float(de)
+    if not np.isfinite(h) or h <= 0.0:
+        raise ValueError("boundary_strip_de must be positive")
+    hx=min(h,0.25*(Mfield["xhi"]-Mfield["xlo"]))
+    hz=min(h,0.25*(Mfield["zhi"]-Mfield["zlo"]))
+
+    pxi=xi_x*px + xi_z*pz
+    fxsurf=w*vx*pxi
+    fzsurf=w*vz*pxi
+
+    left = xp <  Mfield["xlo"] + hx
+    right= xp >= Mfield["xhi"] - hx
+    bot  = zp <  Mfield["zlo"] + hz
+    top  = zp >= Mfield["zhi"] - hz
+
+    Bxl=np.sum(fxsurf[left])/hx
+    Bxr=np.sum(fxsurf[right])/hx
+    Bzb=np.sum(fzsurf[bot])/hz
+    Bzt=np.sum(fzsurf[top])/hz
+
+    # Outward-normal surface integral:
+    # x: + at right, - at left; z: + at top, - at bottom.
+    Bx=Bxr-Bxl
+    Bz=Bzt-Bzb
+    Bsurf=Bx+Bz
+    surf=dict(total=float(Bsurf),x=float(Bx),z=float(Bz),
+              left=float(Bxl),right=float(Bxr),
+              bottom=float(Bzb),top=float(Bzt))
+
+    return float(Pxi),float(Qem),float(Qkin),surf,int(len(w))
 
 
 def main():
     args=parse_args()
     yt.funcs.mylog.setLevel(40)
     P=params()
+    if args.boundary_strip_de <= 0.0:
+        raise ValueError("--boundary-strip-de must be > 0")
 
     files=sorted(
         glob.glob(str(Path(args.phase_root)/"step*"/"diags"/"diag1*")),
@@ -275,19 +326,32 @@ def main():
     rows=[]
     for k,s in enumerate(states,1):
         Mfield=load_mesh(s["fn"],args.field_coarsen)
-        Pi,QEi,QKi,Ni=particle_weak_terms(
-            s["fn"],"ions",P["mi"],+QE,Mfield,s["M"],xix,xiz,grads
+        Pi,QEi,QKi,Si,Ni=particle_weak_terms(
+            s["fn"],"ions",P["mi"],+QE,Mfield,s["M"],xix,xiz,grads,
+            args.boundary_strip_de,P["de"]
         )
-        Pe,QEe,QKe,Ne=particle_weak_terms(
-            s["fn"],"electrons",ME,-QE,Mfield,s["M"],xix,xiz,grads
+        Pe,QEe,QKe,Se,Ne=particle_weak_terms(
+            s["fn"],"electrons",ME,-QE,Mfield,s["M"],xix,xiz,grads,
+            args.boundary_strip_de,P["de"]
         )
         Ptot=Pi+Pe
         Qem=QEi+QEe
         Qki=QKi/P["wci"]; Qke=QKe/P["wci"]; Rem=Qem/P["wci"]
+        rhs_vol=Rem+Qki+Qke
+        Bsi=Si["total"]/P["wci"]; Bse=Se["total"]/P["wci"]
+        Bxi=Si["x"]/P["wci"]; Bxe=Se["x"]/P["wci"]
+        Bzi=Si["z"]/P["wci"]; Bze=Se["z"]/P["wci"]
+        rhs_corr=rhs_vol-(Bsi+Bse)
+        Bleft =(Si["left"]  +Se["left"])  /P["wci"]
+        Bright=(Si["right"] +Se["right"]) /P["wci"]
+        Bbot  =(Si["bottom"]+Se["bottom"])/P["wci"]
+        Btop  =(Si["top"]   +Se["top"])   /P["wci"]
         rows.append([
             s["step"],s["t"],s["q"],Ptot,
-            Rem,Qki,Qke,Rem+Qki+Qke,
-            Pi,Pe,QEi/P["wci"],QEe/P["wci"],Ni,Ne
+            Rem,Qki,Qke,rhs_vol,
+            Pi,Pe,QEi/P["wci"],QEe/P["wci"],Ni,Ne,
+            Bsi,Bse,Bxi,Bxe,Bzi,Bze,rhs_corr,
+            Bleft,Bright,Bbot,Btop
         ])
         print(
             f"[{k:02d}/{len(states):02d}] step={s['step']} tau={s['t']:.6f} "
@@ -299,8 +363,14 @@ def main():
         "ishizawa_particle_quadrature_closure_history.txt",a,
         header=(
             "step omega_ci_t q Pxi_total QEM_over_wci Qkin_i_over_wci "
-            "Qkin_e_over_wci Qrhs_over_wci Pxi_i Pxi_e "
-            "QEM_i_over_wci QEM_e_over_wci Ni_macro Ne_macro"
+            "Qkin_e_over_wci Qrhs_volume_over_wci Pxi_i Pxi_e "
+            "QEM_i_over_wci QEM_e_over_wci Ni_macro Ne_macro "
+            "Qsurf_i_over_wci Qsurf_e_over_wci "
+            "Qsurf_x_i_over_wci Qsurf_x_e_over_wci "
+            "Qsurf_z_i_over_wci Qsurf_z_e_over_wci "
+            "Qrhs_corrected_over_wci "
+            "Qsurf_left_total_over_wci Qsurf_right_total_over_wci "
+            "Qsurf_bottom_total_over_wci Qsurf_top_total_over_wci"
         )
     )
 
@@ -312,21 +382,44 @@ def main():
     Zem,RemR2,_,_=fit_phasor(t,a[:,4],args.period)
     Zki,RkiR2,_,_=fit_phasor(t,a[:,5],args.period)
     Zke,RkeR2,_,_=fit_phasor(t,a[:,6],args.period)
-    Zrhs=Zem+Zki+Zke
-    Zres=Zlhs-Zrhs
-    rel=abs(Zres)/max(abs(Zlhs),1e-300)
-    amp=abs(Zrhs)/max(abs(Zlhs),1e-300)
-    phase=np.angle(Zrhs/Zlhs)
+    Zrhs_vol=Zem+Zki+Zke
+
+    Zsi,RsiR2,_,_=fit_phasor(t,a[:,14],args.period)
+    Zse,RseR2,_,_=fit_phasor(t,a[:,15],args.period)
+    Zsx_i,_,_,_=fit_phasor(t,a[:,16],args.period)
+    Zsx_e,_,_,_=fit_phasor(t,a[:,17],args.period)
+    Zsz_i,_,_,_=fit_phasor(t,a[:,18],args.period)
+    Zsz_e,_,_,_=fit_phasor(t,a[:,19],args.period)
+    Zsurf=Zsi+Zse
+    Zsx=Zsx_i+Zsx_e
+    Zsz=Zsz_i+Zsz_e
+    Zleft,_,_,_=fit_phasor(t,a[:,21],args.period)
+    Zright,_,_,_=fit_phasor(t,a[:,22],args.period)
+    Zbottom,_,_,_=fit_phasor(t,a[:,23],args.period)
+    Ztop,_,_,_=fit_phasor(t,a[:,24],args.period)
+
+    Zrhs_corr=Zrhs_vol-Zsurf
+    Zres_vol=Zlhs-Zrhs_vol
+    Zres_corr=Zlhs-Zrhs_corr
+    rel_vol=abs(Zres_vol)/max(abs(Zlhs),1e-300)
+    rel_corr=abs(Zres_corr)/max(abs(Zlhs),1e-300)
+    amp_vol=abs(Zrhs_vol)/max(abs(Zlhs),1e-300)
+    amp_corr=abs(Zrhs_corr)/max(abs(Zlhs),1e-300)
+    phase_vol=np.angle(Zrhs_vol/Zlhs)
+    phase_corr=np.angle(Zrhs_corr/Zlhs)
 
     dPraw=np.gradient(a[:,3],t,edge_order=2)
-    raw_rel=np.sqrt(np.mean((dPraw-a[:,7])**2))/max(
+    raw_rel_vol=np.sqrt(np.mean((dPraw-a[:,7])**2))/max(
+        np.sqrt(np.mean(dPraw*dPraw)),1e-300
+    )
+    raw_rel_corr=np.sqrt(np.mean((dPraw-a[:,20])**2))/max(
         np.sqrt(np.mean(dPraw*dPraw)),1e-300
     )
 
     with open("ishizawa_particle_quadrature_closure_summary.txt","w") as f:
         f.write("Direct particle-quadrature weak-form momentum closure\n")
         f.write("=====================================================\n\n")
-        f.write("Equation: dP_xi/dtau = (Q_EM + Q_kin,i + Q_kin,e)/omega_ci\n")
+        f.write("Equation: dP_xi/dtau = (Q_EM + Q_kin,i + Q_kin,e - Q_surf)/omega_ci\n")
         f.write("All P, force, and kinetic-flux moments use the same WarpX particle weights.\n\n")
         f.write(f"points = {len(a)}\n")
         f.write(f"window omega_ci*t = {t.min():.8f} .. {t.max():.8f}\n")
@@ -341,29 +434,45 @@ def main():
         f.write(f"mode coarsen = {args.mode_coarsen}\n")
         f.write(f"field coarsen = {args.field_coarsen}\n")
         f.write(f"x edge taper / de = {args.x_edge_taper_de:.8f}\n")
-        f.write(f"periodic x gradient = {int(args.periodic_x_gradient)}\n\n")
+        f.write(f"periodic x gradient = {int(args.periodic_x_gradient)}\n")
+        f.write(f"boundary strip / de = {args.boundary_strip_de:.8f}\n\n")
 
         f.write("Breathing-frequency complex amplitudes\n")
         f.write("--------------------------------------\n")
         f.write("channel                 Re(Z)              Im(Z)             |Z|\n")
         for name,Z in [
             ("dPxi/dtau",Zlhs),("EM",Zem),("ion kinetic",Zki),
-            ("electron kinetic",Zke),("RHS sum",Zrhs),("residual",Zres)
+            ("electron kinetic",Zke),("surface ion",Zsi),
+            ("surface electron",Zse),("surface left",Zleft),
+            ("surface right",Zright),("surface bottom",Zbottom),
+            ("surface top",Ztop),("surface x total",Zsx),
+            ("surface z total",Zsz),("surface total",Zsurf),
+            ("volume RHS",Zrhs_vol),("corrected RHS",Zrhs_corr),
+            ("volume residual",Zres_vol),("corrected residual",Zres_corr)
         ]:
             f.write(f"{name:18s} {Z.real:+17.8e} {Z.imag:+17.8e} {abs(Z):17.8e}\n")
         f.write("\n")
-        f.write(f"fundamental complex closure relative error = {rel:.8e}\n")
-        f.write(f"|rhs|/|lhs| = {amp:.8f}\n")
-        f.write(f"phase(rhs/lhs) [rad] = {phase:+.8f}\n")
-        f.write(f"raw finite-difference closure relRMS (diagnostic only) = {raw_rel:.8e}\n\n")
+        f.write(f"volume-only fundamental complex closure relative error = {rel_vol:.8e}\n")
+        f.write(f"surface-corrected fundamental complex closure relative error = {rel_corr:.8e}\n")
+        f.write(f"|volume rhs|/|lhs| = {amp_vol:.8f}\n")
+        f.write(f"|corrected rhs|/|lhs| = {amp_corr:.8f}\n")
+        f.write(f"phase(volume rhs/lhs) [rad] = {phase_vol:+.8f}\n")
+        f.write(f"phase(corrected rhs/lhs) [rad] = {phase_corr:+.8f}\n")
+        f.write(f"surface ion harmonic R2 = {RsiR2:.8f}\n")
+        f.write(f"surface electron harmonic R2 = {RseR2:.8f}\n")
+        f.write(f"raw FD volume-only relRMS (diagnostic only) = {raw_rel_vol:.8e}\n")
+        f.write(f"raw FD surface-corrected relRMS (diagnostic only) = {raw_rel_corr:.8e}\n\n")
         f.write("Interpretation guide\n")
         f.write("--------------------\n")
         f.write(
             "If this particle-quadrature closure is substantially better than the "
             "mixed mesh/particle closure, the old residual was mainly deposition/"
             "normalization inconsistency. If a comparable residual remains, the "
-            "next checks are field interpolation/staggering, finite time sampling, "
-            "and the weak-form boundary term. Because xi is fixed in this equation, "
+            "next checks are field interpolation/staggering and finite time sampling. "
+            "The explicit surface term reported here is a particle-strip estimate; "
+            "on periodic x its right-minus-left piece is a seam-consistency diagnostic, "
+            "whereas the top-minus-bottom z piece is the physical surface flux. "
+            "Because xi is fixed in this equation, "
             "a physical time-dependent mode shape is not itself a missing term in "
             "this exact fixed-test-function conservation identity.\n"
         )
@@ -373,7 +482,9 @@ def main():
     em_h=harmonic_series(Zem,t,args.period,t0)
     ki_h=harmonic_series(Zki,t,args.period,t0)
     ke_h=harmonic_series(Zke,t,args.period,t0)
-    rhs_h=em_h+ki_h+ke_h
+    rhs_vol_h=em_h+ki_h+ke_h
+    surf_h=harmonic_series(Zsurf,t,args.period,t0)
+    rhs_corr_h=rhs_vol_h-surf_h
     scale=max(np.max(np.abs(lhs_h)),1e-300)
 
     fig,axs=plt.subplots(2,1,figsize=(9,7),sharex=True)
@@ -385,7 +496,9 @@ def main():
     axs[1].plot(t,em_h/scale,"o-",label="EM")
     axs[1].plot(t,ki_h/scale,"o-",label="ion kinetic flux")
     axs[1].plot(t,ke_h/scale,"o-",label="electron kinetic flux")
-    axs[1].plot(t,rhs_h/scale,"k--",lw=2,label="RHS sum")
+    axs[1].plot(t,-surf_h/scale,"o-",label="- surface flux")
+    axs[1].plot(t,rhs_vol_h/scale,"--",lw=1.5,label="volume RHS")
+    axs[1].plot(t,rhs_corr_h/scale,"k--",lw=2,label="surface-corrected RHS")
     axs[1].axhline(0,lw=.7); axs[1].grid(alpha=.25)
     axs[1].legend(fontsize=8,ncol=2)
     axs[1].set_xlabel(r"$\omega_{ci}t$")
@@ -399,7 +512,9 @@ def main():
     s=max(abs(Zlhs),1e-300)
     for name,Z in [
         ("LHS",Zlhs),("EM",Zem),("ion kinetic",Zki),
-        ("electron kinetic",Zke),("RHS",Zrhs),("residual",Zres)
+        ("electron kinetic",Zke),("-surface",-Zsurf),
+        ("volume RHS",Zrhs_vol),("corrected RHS",Zrhs_corr),
+        ("corrected residual",Zres_corr)
     ]:
         zz=Z/s
         ax.arrow(0,0,zz.real,zz.imag,length_includes_head=True,
@@ -408,7 +523,10 @@ def main():
     ax.axhline(0,lw=.7); ax.axvline(0,lw=.7)
     ax.set_xlabel(r"Re$(Z)/|Z_{LHS}|$")
     ax.set_ylabel(r"Im$(Z)/|Z_{LHS}|$")
-    ax.set_title(f"Particle-quadrature closure; complex error={rel:.3f}")
+    ax.set_title(
+        f"Particle-quadrature closure; volume={rel_vol:.3f}, "
+        f"surface-corrected={rel_corr:.3f}"
+    )
     ax.grid(alpha=.25); ax.set_aspect("equal",adjustable="datalim")
     fig.tight_layout()
     fig.savefig("ishizawa_particle_quadrature_closure_complex.png",dpi=210)
@@ -419,11 +537,15 @@ def main():
     print("="*78)
     print(f"points                    : {len(a)}")
     print(f"P_xi harmonic R2          : {Rp:.6f}")
-    print(f"complex closure error     : {rel:.6f}")
-    print(f"|RHS|/|LHS|               : {amp:.6f}")
-    print(f"phase(RHS/LHS) [rad]      : {phase:+.6f}")
-    print(f"raw FD relRMS             : {raw_rel:.6f}")
+    print(f"volume-only complex error : {rel_vol:.6f}")
+    print(f"surface-corrected error   : {rel_corr:.6f}")
+    print(f"|volume RHS|/|LHS|        : {amp_vol:.6f}")
+    print(f"|corrected RHS|/|LHS|     : {amp_corr:.6f}")
+    print(f"phase corrected [rad]     : {phase_corr:+.6f}")
+    print(f"raw FD volume relRMS      : {raw_rel_vol:.6f}")
+    print(f"raw FD corrected relRMS   : {raw_rel_corr:.6f}")
     print(f"x edge taper / de         : {args.x_edge_taper_de:.3f}")
+    print(f"boundary strip / de       : {args.boundary_strip_de:.3f}")
     print(f"periodic x gradient       : {args.periodic_x_gradient}")
     print("Saved ishizawa_particle_quadrature_closure_summary.txt")
     print("Saved ishizawa_particle_quadrature_closure_history.txt")
