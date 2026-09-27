@@ -342,11 +342,16 @@ def main():
         Bxi=Si["x"]/P["wci"]; Bxe=Se["x"]/P["wci"]
         Bzi=Si["z"]/P["wci"]; Bze=Se["z"]/P["wci"]
         rhs_corr=rhs_vol-(Bsi+Bse)
+        Bleft =(Si["left"]  +Se["left"])  /P["wci"]
+        Bright=(Si["right"] +Se["right"]) /P["wci"]
+        Bbot  =(Si["bottom"]+Se["bottom"])/P["wci"]
+        Btop  =(Si["top"]   +Se["top"])   /P["wci"]
         rows.append([
             s["step"],s["t"],s["q"],Ptot,
             Rem,Qki,Qke,rhs_vol,
             Pi,Pe,QEi/P["wci"],QEe/P["wci"],Ni,Ne,
-            Bsi,Bse,Bxi,Bxe,Bzi,Bze,rhs_corr
+            Bsi,Bse,Bxi,Bxe,Bzi,Bze,rhs_corr,
+            Bleft,Bright,Bbot,Btop
         ])
         print(
             f"[{k:02d}/{len(states):02d}] step={s['step']} tau={s['t']:.6f} "
@@ -363,7 +368,9 @@ def main():
             "Qsurf_i_over_wci Qsurf_e_over_wci "
             "Qsurf_x_i_over_wci Qsurf_x_e_over_wci "
             "Qsurf_z_i_over_wci Qsurf_z_e_over_wci "
-            "Qrhs_corrected_over_wci"
+            "Qrhs_corrected_over_wci "
+            "Qsurf_left_total_over_wci Qsurf_right_total_over_wci "
+            "Qsurf_bottom_total_over_wci Qsurf_top_total_over_wci"
         )
     )
 
@@ -386,6 +393,10 @@ def main():
     Zsurf=Zsi+Zse
     Zsx=Zsx_i+Zsx_e
     Zsz=Zsz_i+Zsz_e
+    Zleft,_,_,_=fit_phasor(t,a[:,21],args.period)
+    Zright,_,_,_=fit_phasor(t,a[:,22],args.period)
+    Zbottom,_,_,_=fit_phasor(t,a[:,23],args.period)
+    Ztop,_,_,_=fit_phasor(t,a[:,24],args.period)
 
     Zrhs_corr=Zrhs_vol-Zsurf
     Zres_vol=Zlhs-Zrhs_vol
@@ -432,7 +443,9 @@ def main():
         for name,Z in [
             ("dPxi/dtau",Zlhs),("EM",Zem),("ion kinetic",Zki),
             ("electron kinetic",Zke),("surface ion",Zsi),
-            ("surface electron",Zse),("surface x total",Zsx),
+            ("surface electron",Zse),("surface left",Zleft),
+            ("surface right",Zright),("surface bottom",Zbottom),
+            ("surface top",Ztop),("surface x total",Zsx),
             ("surface z total",Zsz),("surface total",Zsurf),
             ("volume RHS",Zrhs_vol),("corrected RHS",Zrhs_corr),
             ("volume residual",Zres_vol),("corrected residual",Zres_corr)
