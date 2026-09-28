@@ -33,8 +33,8 @@ def main():
     for f in fields:
         print(f)
 
-    print("\n=== likely EM/raw fields ===")
-    patt=re.compile(r"(raw|(^|[_])(Ex|Ey|Ez|Bx|By|Bz)($|[_]))",re.I)
+    print("\n=== likely EM/raw/native-particle fields ===")
+    patt=re.compile(r"(raw|particle_(Ex|Ey|Ez|Bx|By|Bz)$|(^|[_])(Ex|Ey|Ez|Bx|By|Bz)($|[_]))",re.I)
     selected=[]
     for f in fields:
         name="/".join(map(str,f))
