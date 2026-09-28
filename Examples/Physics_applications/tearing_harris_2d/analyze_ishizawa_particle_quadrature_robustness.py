@@ -255,7 +255,7 @@ def main():
         )
         axs[0].grid(alpha=.25); axs[0].legend(fontsize=8)
         axs[1].axhline(0,lw=.8)
-        axs[1].set_xlabel(r"window center $\\omega_{ci}t$")
+        axs[1].set_xlabel(r"window center $\omega_{ci}t$")
         axs[1].set_ylabel("phase(RHS/LHS) [rad]")
         axs[1].grid(alpha=.25); axs[1].legend(fontsize=8)
         fig.tight_layout()
