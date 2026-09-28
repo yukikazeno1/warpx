@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Short restart probe that writes fields gathered *on particles* by WarpX using
-# the same gather kernel as the pusher.  This isolates the largest remaining
-# uncertainty in the weak-form Q_EM diagnostic: post-processing currently
-# gathers cell-centered plotfile fields with bilinear interpolation, whereas
-# the production run uses a Yee grid, energy-conserving gather and shape order 2.
+# Short restart probe for validating field gathering.
 #
-# The OpenPMD particle diagnostic can store Ex,Ey,Ez,Bx,By,Bz on each dumped
-# macroparticle. WarpX computes those values with storeFieldOnParticles(), which
-# calls the native field gather.  We dump only a random fraction to keep this
-# probe cheap; ratios/native-vs-cell-centered comparisons use the same sample.
+# The production executable used for the Ishizawa run was built without
+# OpenPMD support, so this probe uses a normal plotfile diagnostic and writes
+# both a random particle sample and the raw staggered Yee fields.
+#
+# A follow-up Python diagnostic reconstructs WarpX's shape-2,
+# energy-conserving field gather from these raw Yee arrays.  This avoids
+# recompiling WarpX with OpenPMD and avoids the cell-centered/bilinear
+# approximation used in the earlier closure script.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -86,8 +86,8 @@ mkdir -p "${OUT_DIR}"
 
 INPUT="${OUT_DIR}/inputs_native_gather_probe"
 
-# Remove the production diagnostic and replace it with a single OpenPMD
-# diagnostic.  Explicitly synchronize particle momentum with position.
+# Remove the production diagnostic and replace it with a raw-Yee plotfile
+# diagnostic. Explicitly synchronize particle momentum with position.
 sed \
     -e "s/^max_step *=.*/max_step = ${END_STEP}/" \
     -e "s/^diagnostics\.diags_names *=.*/diagnostics.diags_names = native/" \
@@ -96,28 +96,28 @@ sed \
 cat >> "${INPUT}" <<EOF
 
 ###############################################################################
-# Native-gather probe
+# Raw-Yee gather probe (compatible with the current non-OpenPMD WarpX build)
 ###############################################################################
 warpx.synchronize_velocity_for_diagnostics = 1
 
 native.diag_type = Full
-native.format = openpmd
+native.format = plotfile
 native.intervals = ${INTERVAL}
 native.file_prefix = diags/native
 native.species = electrons ions
+native.write_species = 1
+native.fields_to_plot = Ex Ey Ez Bx By Bz
 
-# Standard x/z, weighting, and momentum are written by default.
-# These additional variables are gathered by WarpX with the same field-gather
-# machinery used by the particle pusher.
-native.electrons.additional_variables = Ex Ey Ez Bx By Bz
-native.ions.additional_variables      = Ex Ey Ez Bx By Bz
+# Save the native staggered arrays as raw fields in addition to the usual
+# cell-centered diagnostic fields.
+native.plot_raw_fields = 1
+native.plot_raw_fields_guards = 1
 
-# A small unbiased sample is enough to measure native-vs-postprocessed Q_EM
-# while avoiding enormous six-field-per-particle files.
+# Keep a small unbiased particle sample. Standard particle attributes
+# (positions, weighting, momenta) are written by default.
 native.electrons.random_fraction = ${RANDOM_FRACTION}
 native.ions.random_fraction      = ${RANDOM_FRACTION}
 EOF
-
 chk_abs="$(cd "$(dirname "${SOURCE_CHK}")" && pwd)/$(basename "${SOURCE_CHK}")"
 
 echo "=============================================================================="
