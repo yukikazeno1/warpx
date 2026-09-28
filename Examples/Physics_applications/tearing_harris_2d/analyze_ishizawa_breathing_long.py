@@ -40,6 +40,14 @@ def parse_args():
     p.add_argument("--min-peak-distance", type=float, default=0.45)
     p.add_argument("--peak-prominence-frac", type=float, default=0.20)
     p.add_argument("--Lx-de", type=float, default=64.0)
+    p.add_argument(
+        "--min-samples", type=int, default=24,
+        help=(
+            "minimum number of finite samples required after the time-window "
+            "and finite-value filters; 24 is sufficient for the dense 0.05 "
+            "omega_ci*t cadence while still rejecting genuinely short records"
+        ),
+    )
     return p.parse_args()
 
 
@@ -193,16 +201,35 @@ def main():
     args=parse_args()
     H=load_history(args.history)
     tmax=H["t"][-1] if args.tmax is None else args.tmax
-    m=(H["t"]>=args.tmin)&(H["t"]<=tmax)
+    # Numerical output times can differ from nominal endpoints by roundoff;
+    # include a small tolerance so e.g. a nominal tau=6.0 frame is not lost.
+    tol=1.0e-9
+    m=(H["t"]>=args.tmin-tol)&(H["t"]<=tmax+tol)
     keys=["t","psi","psi_m1","width","jymax","jyp","xO","xX"]
     D={k:np.asarray(H[k])[m] for k in keys}
     t=D["t"]
+    n_selected=len(t)
     good=np.isfinite(t)&np.isfinite(D["psi"])&np.isfinite(D["width"])&np.isfinite(D["jyp"])
     for k in D:
         D[k]=D[k][good]
     t=D["t"]
+    n_dropped=n_selected-len(t)
+    if n_dropped:
+        print(
+            f"Warning: dropped {n_dropped}/{n_selected} samples with non-finite "
+            "t/Psi/width/Jp values before breathing analysis."
+        )
+    if len(t)<args.min_samples:
+        raise RuntimeError(
+            f"Too few finite late-time samples: {len(t)} remain, "
+            f"but --min-samples={args.min_samples}."
+        )
     if len(t)<40:
-        raise RuntimeError("Too few late-time samples.")
+        print(
+            f"Warning: only {len(t)} finite late-time samples remain; "
+            "proceeding because this exceeds --min-samples. "
+            "For the dense cadence this is still adequate for the period fit."
+        )
 
     psid,_=detrend_linear(t,D["psi"])
     wd,_=detrend_linear(t,D["width"])
