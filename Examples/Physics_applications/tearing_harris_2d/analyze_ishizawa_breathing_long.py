@@ -201,7 +201,10 @@ def main():
     args=parse_args()
     H=load_history(args.history)
     tmax=H["t"][-1] if args.tmax is None else args.tmax
-    m=(H["t"]>=args.tmin)&(H["t"]<=tmax)
+    # Numerical output times can differ from nominal endpoints by roundoff;
+    # include a small tolerance so e.g. a nominal tau=6.0 frame is not lost.
+    tol=1.0e-9
+    m=(H["t"]>=args.tmin-tol)&(H["t"]<=tmax+tol)
     keys=["t","psi","psi_m1","width","jymax","jyp","xO","xX"]
     D={k:np.asarray(H[k])[m] for k in keys}
     t=D["t"]
