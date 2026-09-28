@@ -7,10 +7,9 @@ set -euo pipefail
 # OpenPMD support, so this probe uses a normal plotfile diagnostic and writes
 # both a random particle sample and the raw staggered Yee fields.
 #
-# A follow-up Python diagnostic reconstructs WarpX's shape-2,
-# energy-conserving field gather from these raw Yee arrays.  This avoids
-# recompiling WarpX with OpenPMD and avoids the cell-centered/bilinear
-# approximation used in the earlier closure script.
+# This branch extends the ordinary plotfile writer so Ex/Ey/Ez/Bx/By/Bz can
+# be stored directly on sampled particles using WarpX's own native gather
+# helper.  Raw Yee fields are retained as an independent cross-check.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -112,6 +111,11 @@ native.fields_to_plot = Ex Ey Ez Bx By Bz
 # cell-centered diagnostic fields.
 native.plot_raw_fields = 1
 native.plot_raw_fields_guards = 1
+
+# Request fields on sampled particles.  The plotfile writer on this branch
+# calls storeFieldOnParticles(), i.e. WarpX's native gather, before writing.
+native.electrons.additional_variables = Ex Ey Ez Bx By Bz
+native.ions.additional_variables      = Ex Ey Ez Bx By Bz
 
 # Keep a small unbiased particle sample. Standard particle attributes
 # (positions, weighting, momenta) are written by default.
