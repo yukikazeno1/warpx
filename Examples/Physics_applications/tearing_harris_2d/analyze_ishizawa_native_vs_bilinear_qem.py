@@ -372,7 +372,7 @@ def main():
     axs[0].bar(x-bw/2,qn,bw,label="WarpX native gather")
     axs[0].bar(x+bw/2,qc,bw,label="cell-centered bilinear")
     axs[0].set_xticks(x,labels)
-    axs[0].set_ylabel(r"$Q_{EM}/\\omega_{ci}$ (sample)")
+    axs[0].set_ylabel(r"$Q_{EM}/\omega_{ci}$ (sample)")
     axs[0].set_title("Same-particle electromagnetic weak-form projection")
     axs[0].grid(axis="y",alpha=.25)
     axs[0].legend()
