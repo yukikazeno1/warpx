@@ -31,7 +31,9 @@ import numpy as np
 import yt
 
 from analyze_ishizawa_scale_40000 import QE, ME, C, params
-from analyze_ishizawa_particle_moments import load_mesh, deposit_species, particle_array
+from analyze_ishizawa_particle_moments import (
+    load_mesh, deposit_species, particle_array, si_mesh
+)
 from analyze_ishizawa_nonaffine_breathing_mode import (
     step_from_parent, harmonic_fit, smooth2, weighted_mean
 )
@@ -57,6 +59,48 @@ def parse_args():
                    help="optional full-particle closure history for an absolute QEM check")
     p.add_argument("--out-prefix", default="ishizawa_native_vs_bilinear_qem")
     return p.parse_args()
+
+
+def load_field_mesh_only(path):
+    """Load only cell-centered E/B fields from a probe plotfile.
+
+    The native-gather probe deliberately writes only Ex/Ey/Ez/Bx/By/Bz plus
+    sampled particles; it does not include rho_ions/rho_electrons.  The
+    general load_mesh() helper used for the full dense diagnostics requires
+    those density fields, so use this lighter loader for the probe.
+    """
+    ds=yt.load(path)
+    nx=int(ds.domain_dimensions[0])
+    nz=int(ds.domain_dimensions[1])
+
+    xlo=ds.domain_left_edge[0].to_value("m")
+    xhi=ds.domain_right_edge[0].to_value("m")
+    zlo=ds.domain_left_edge[1].to_value("m")
+    zhi=ds.domain_right_edge[1].to_value("m")
+
+    dx=(xhi-xlo)/nx
+    dz=(zhi-zlo)/nz
+    x=xlo+(np.arange(nx)+0.5)*dx
+    z=zlo+(np.arange(nz)+0.5)*dz
+
+    g=ds.covering_grid(
+        level=0,
+        left_edge=ds.domain_left_edge,
+        dims=ds.domain_dimensions
+    )
+
+    fields={}
+    for name,unit in [
+        ("Ex","V/m"),("Ey","V/m"),("Ez","V/m"),
+        ("Bx","T"),("By","T"),("Bz","T")
+    ]:
+        fields[name]=si_mesh(g,name,unit,nx,nz)
+
+    fields.update(
+        ds=ds,x=x,z=z,xlo=xlo,xhi=xhi,zlo=zlo,zhi=zhi,
+        dx=dx,dz=dz,nx=nx,nz=nz,t=ds.current_time.to_value("s")
+    )
+    return fields
 
 
 def build_mode(args, P):
@@ -229,7 +273,7 @@ def main():
 
     P=params()
     Mmode,xix,xiz,crossings=build_mode(args,P)
-    Mfield=load_mesh(args.probe,1)
+    Mfield=load_field_mesh_only(args.probe)
 
     ds=yt.load(args.probe)
     tau=float(P["wci"]*ds.current_time.to_value("s"))
