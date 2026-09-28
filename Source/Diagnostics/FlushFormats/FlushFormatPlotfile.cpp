@@ -364,64 +364,6 @@ FlushFormatPlotfile::WriteParticles(const std::string& dir,
             pc->make_alike<>();
         tmp.SetArena(amrex::The_Pinned_Arena());
 
-        Vector<std::string> real_names;
-        Vector<std::string> int_names;
-        Vector<int> int_flags;
-        Vector<int> real_flags;
-
-        // This gets the names correct relative to what WarpX uses, but note that AMReX ignores
-        // these names and always writes the particles out with "x" as the first coordinate,
-        // "y" as the second, and "z" as the third independent of what geometry is being used.
-        // All that matters here is getting the correct number of positions.
-#if !defined (WARPX_DIM_1D_Z)
-        real_names.push_back("position_x");
-#endif
-#if defined (WARPX_DIM_3D)
-        real_names.push_back("position_y");
-#endif
-#if !defined(WARPX_DIM_RCYLINDER) && !defined(WARPX_DIM_RSPHERE)
-        real_names.push_back("position_z");
-#endif
-
-        real_names.push_back("weight");
-        real_names.push_back("momentum_x");
-        real_names.push_back("momentum_y");
-        real_names.push_back("momentum_z");
-
-#if defined(WARPX_DIM_RZ) || defined(WARPX_DIM_RCYLINDER) || defined(WARPX_DIM_RSPHERE)
-        real_names.push_back("theta");
-#endif
-#if defined(WARPX_DIM_RSPHERE)
-        real_names.push_back("phi");
-#endif
-
-        // get the names of the extra real comps
-        real_names.resize(tmp.NumRealComps());
-        real_flags = part_diag.m_plot_flags;
-        real_flags.resize(tmp.NumRealComps());
-
-        // note, skip the required component names here
-        auto rnames = tmp.GetRealSoANames();
-        for (std::size_t index = PIdx::nattribs; index < rnames.size(); ++index) {
-            real_names[index] = rnames[index];
-            real_flags[index] = tmp.h_redistribute_real_comp[index];
-        }
-
-        //   note: skip the mandatory AMREX_SPACEDIM positions for pure SoA
-        real_names.erase(real_names.begin(), real_names.begin() + AMREX_SPACEDIM);
-        real_flags.erase(real_flags.begin(), real_flags.begin() + AMREX_SPACEDIM);
-
-        // and the int comps
-        int_names.resize(tmp.NumIntComps());
-        int_flags.resize(tmp.NumIntComps());
-        //   note: inames and h_redistribute_int_comp are not the same size
-        auto inames = tmp.GetIntSoANames();
-        std::size_t const i0_redist = tmp.h_redistribute_int_comp.size() - inames.size();
-        for (std::size_t index = 0; index < inames.size(); ++index) {
-            int_names[index] = inames[index];
-            int_flags[index] = tmp.h_redistribute_int_comp[i0_redist + index];
-        }
-
         const auto mass = pc->AmIA<PhysicalSpecies::photon>() ? PhysConst::m_e : pc->getMass();
         RandomFilter const random_filter(part_diag.m_do_random_filter,
                                          part_diag.m_random_fraction);
@@ -464,15 +406,8 @@ FlushFormatPlotfile::WriteParticles(const std::string& dir,
         }
 
         // Full plotfile diagnostics can also store grid fields gathered on the
-        // sampled macroparticles.  This uses the exact same WarpX gather helper
-        // as the OpenPMD diagnostic path (native staggered Yee fields, selected
-        // field-gathering algorithm and particle shape), and therefore avoids
-        // reconstructing the gather from cell-centered plotfile fields.
-        //
-        // ParticleDiag already parses Ex/Ey/Ez/Bx/By/Bz into the m_plot_*
-        // flags for all full diagnostics. Historically the plotfile writer did
-        // not act on these flags, whereas the OpenPMD writer did. Support them
-        // here as well.
+        // sampled macroparticles.  This uses the same WarpX gather helper as
+        // the OpenPMD diagnostic path.
         if (part_diag.m_plot_Ex || part_diag.m_plot_Ey || part_diag.m_plot_Ez ||
             part_diag.m_plot_Bx || part_diag.m_plot_By || part_diag.m_plot_Bz)
         {
@@ -481,21 +416,66 @@ FlushFormatPlotfile::WriteParticles(const std::string& dir,
                 "Particle field output in plotfile format is currently supported "
                 "only for Full diagnostics, not back-transformed diagnostics."
             );
+            amrex::Print() << Utils::TextMsg::Info(
+                "Plotfile diagnostic: gathering requested E/B fields on particles "
+                "with WarpX native field gather."
+            );
             storeFieldOnParticles(
                 tmp, true,
                 part_diag.m_plot_Ex, part_diag.m_plot_Ey, part_diag.m_plot_Ez,
                 part_diag.m_plot_Bx, part_diag.m_plot_By, part_diag.m_plot_Bz
             );
+        }
 
-            // The vectors above were assembled before storeFieldOnParticles()
-            // added these runtime real components, so append their names/flags
-            // in the same order in which ParticleIO.cpp adds them.
-            if (part_diag.m_plot_Ex) { real_names.push_back("Ex"); real_flags.push_back(1); }
-            if (part_diag.m_plot_Ey) { real_names.push_back("Ey"); real_flags.push_back(1); }
-            if (part_diag.m_plot_Ez) { real_names.push_back("Ez"); real_flags.push_back(1); }
-            if (part_diag.m_plot_Bx) { real_names.push_back("Bx"); real_flags.push_back(1); }
-            if (part_diag.m_plot_By) { real_names.push_back("By"); real_flags.push_back(1); }
-            if (part_diag.m_plot_Bz) { real_names.push_back("Bz"); real_flags.push_back(1); }
+        // Build names and flags *after* optional runtime components (Ex..Bz)
+        // have been added.  This mirrors the OpenPMD path and avoids stale
+        // name/flag vectors that omit components added by storeFieldOnParticles.
+        Vector<std::string> real_names;
+        Vector<std::string> int_names;
+        Vector<int> int_flags;
+        Vector<int> real_flags;
+
+#if !defined (WARPX_DIM_1D_Z)
+        real_names.push_back("position_x");
+#endif
+#if defined (WARPX_DIM_3D)
+        real_names.push_back("position_y");
+#endif
+#if !defined(WARPX_DIM_RCYLINDER) && !defined(WARPX_DIM_RSPHERE)
+        real_names.push_back("position_z");
+#endif
+        real_names.push_back("weight");
+        real_names.push_back("momentum_x");
+        real_names.push_back("momentum_y");
+        real_names.push_back("momentum_z");
+
+#if defined(WARPX_DIM_RZ) || defined(WARPX_DIM_RCYLINDER) || defined(WARPX_DIM_RSPHERE)
+        real_names.push_back("theta");
+#endif
+#if defined(WARPX_DIM_RSPHERE)
+        real_names.push_back("phi");
+#endif
+
+        real_names.resize(tmp.NumRealComps());
+        real_flags = part_diag.m_plot_flags;
+        real_flags.resize(tmp.NumRealComps());
+
+        auto rnames = tmp.GetRealSoANames();
+        for (std::size_t index = PIdx::nattribs; index < rnames.size(); ++index) {
+            real_names[index] = rnames[index];
+            real_flags[index] = tmp.h_redistribute_real_comp[index];
+        }
+
+        real_names.erase(real_names.begin(), real_names.begin() + AMREX_SPACEDIM);
+        real_flags.erase(real_flags.begin(), real_flags.begin() + AMREX_SPACEDIM);
+
+        int_names.resize(tmp.NumIntComps());
+        int_flags.resize(tmp.NumIntComps());
+        auto inames = tmp.GetIntSoANames();
+        std::size_t const i0_redist = tmp.h_redistribute_int_comp.size() - inames.size();
+        for (std::size_t index = 0; index < inames.size(); ++index) {
+            int_names[index] = inames[index];
+            int_flags[index] = tmp.h_redistribute_int_comp[i0_redist + index];
         }
 
         // real_names contains a list of all particle attributes.
