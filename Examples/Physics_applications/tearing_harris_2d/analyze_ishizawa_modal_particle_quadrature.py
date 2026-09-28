@@ -229,8 +229,16 @@ def main():
     if args.boundary_strip_de <= 0.0:
         raise ValueError("--boundary-strip-de must be > 0")
 
+    # Support both the original per-target layout
+    #   phase_root/stepNNNNNN/diags/diag1*
+    # and the dense continuation layout
+    #   phase_root/diags/diag1*
+    # introduced by run_ishizawa_scale_dense_particle_window.sh.
     files=sorted(
-        glob.glob(str(Path(args.phase_root)/"step*"/"diags"/"diag1*")),
+        set(
+            glob.glob(str(Path(args.phase_root)/"step*"/"diags"/"diag1*"))
+            + glob.glob(str(Path(args.phase_root)/"diags"/"diag1*"))
+        ),
         key=step_from_parent
     )
     if len(files)<6:

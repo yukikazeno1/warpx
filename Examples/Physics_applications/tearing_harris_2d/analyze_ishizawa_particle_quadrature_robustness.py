@@ -31,6 +31,12 @@ def parse_args():
     p.add_argument("--period-max", type=float, default=0.70)
     p.add_argument("--period-n", type=int, default=141)
     p.add_argument("--out-prefix", default="ishizawa_particle_quadrature_robustness")
+    p.add_argument("--window-width", type=float, default=1.26,
+                   help="sliding-window width in omega_ci*t; default is 2*T for T=0.63")
+    p.add_argument("--window-step", type=float, default=0.20,
+                   help="spacing between sliding-window starts")
+    p.add_argument("--min-window-points", type=int, default=12,
+                   help="minimum samples required in each sliding window")
     return p.parse_args()
 
 
@@ -92,6 +98,7 @@ def main():
     periods = np.linspace(args.period_min, args.period_max, args.period_n)
 
     all_results = []
+    sliding_results = []
     lines = []
     lines.append("Particle-quadrature closure robustness\n")
     lines.append("======================================\n\n")
@@ -131,6 +138,28 @@ def main():
 
         all_results.append((lab,base,loo_v,loo_c,ev,ec))
 
+        # Sliding-window robustness.  This is the key diagnostic for a dense
+        # particle-rich continuation: a physical closure should give nearly
+        # the same complex error and phase in overlapping windows spanning
+        # roughly two breathing periods.
+        sw=[]
+        t=a[:,1]
+        width=float(args.window_width)
+        step=float(args.window_step)
+        if width > 0.0 and step > 0.0 and t.max()-t.min() >= width:
+            starts=np.arange(t.min(),t.max()-width+0.5*step,step)
+            for t0 in starts:
+                mask=(t >= t0-1e-12) & (t <= t0+width+1e-12)
+                if np.count_nonzero(mask) < args.min_window_points:
+                    continue
+                rr=closure_for_rows(a[mask],args.period)
+                sw.append((
+                    0.5*(t0+t0+width), np.count_nonzero(mask),
+                    rr["err_vol"],rr["err_corr"],rr["phase_corr"],
+                    rr["amp_corr"],rr["surf_frac"]
+                ))
+        sliding_results.append((lab,np.asarray(sw,float) if sw else np.empty((0,7))))
+
         lines.append(f"[{lab}] {path}\n")
         lines.append(f"points = {len(a)}\n")
         lines.append(f"base T = {args.period:.8f}\n")
@@ -149,6 +178,25 @@ def main():
             names=["drop first","drop last","drop both"]
             for nm,(x,y) in zip(names,edge):
                 lines.append(f"{nm}: volume={x:.8e} corrected={y:.8e}\n")
+        if sw:
+            swa=np.asarray(sw,float)
+            lines.append(
+                f"sliding windows: width={args.window_width:.8f} "
+                f"step={args.window_step:.8f} count={len(swa)}\n"
+            )
+            lines.append(
+                "sliding corrected error min/median/max = "
+                f"{swa[:,3].min():.8e} {np.median(swa[:,3]):.8e} {swa[:,3].max():.8e}\n"
+            )
+            lines.append(
+                "sliding corrected phase min/median/max [rad] = "
+                f"{swa[:,4].min():+.8e} {np.median(swa[:,4]):+.8e} {swa[:,4].max():+.8e}\n"
+            )
+        else:
+            lines.append(
+                f"sliding windows: none (need span >= {args.window_width:.8f} "
+                f"and >= {args.min_window_points} points/window)\n"
+            )
         lines.append("\n")
 
         axs[0].plot(periods, ev, label=f"{lab} volume")
@@ -192,12 +240,36 @@ def main():
     fig.savefig(args.out_prefix + "_strip_compare.png",dpi=210)
     plt.close(fig)
 
+    # Sliding-window figure is written only when at least one input history
+    # contains enough temporal coverage.
+    if any(len(a)>0 for _,a in sliding_results):
+        fig,axs=plt.subplots(2,1,figsize=(9,7),sharex=True)
+        for lab,sw in sliding_results:
+            if len(sw)==0:
+                continue
+            axs[0].plot(sw[:,0],sw[:,3],"o-",label=f"{lab} corrected error")
+            axs[1].plot(sw[:,0],sw[:,4],"o-",label=f"{lab} corrected phase")
+        axs[0].set_ylabel("complex closure error")
+        axs[0].set_title(
+            f"Sliding-window closure robustness: width={args.window_width:g}"
+        )
+        axs[0].grid(alpha=.25); axs[0].legend(fontsize=8)
+        axs[1].axhline(0,lw=.8)
+        axs[1].set_xlabel(r"window center $\\omega_{ci}t$")
+        axs[1].set_ylabel("phase(RHS/LHS) [rad]")
+        axs[1].grid(alpha=.25); axs[1].legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(args.out_prefix + "_sliding.png",dpi=210)
+        plt.close(fig)
+
     with open(args.out_prefix + "_summary.txt","w") as f:
         f.writelines(lines)
 
     print("Saved", args.out_prefix + "_summary.txt")
     print("Saved", args.out_prefix + ".png")
     print("Saved", args.out_prefix + "_strip_compare.png")
+    if any(len(a)>0 for _,a in sliding_results):
+        print("Saved", args.out_prefix + "_sliding.png")
 
 
 if __name__ == "__main__":
