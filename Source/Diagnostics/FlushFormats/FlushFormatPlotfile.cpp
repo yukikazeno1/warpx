@@ -463,6 +463,41 @@ FlushFormatPlotfile::WriteParticles(const std::string& dir,
             particlesConvertUnits(ConvertDirection::SI_to_WarpX, pinned_pc, mass);
         }
 
+        // Full plotfile diagnostics can also store grid fields gathered on the
+        // sampled macroparticles.  This uses the exact same WarpX gather helper
+        // as the OpenPMD diagnostic path (native staggered Yee fields, selected
+        // field-gathering algorithm and particle shape), and therefore avoids
+        // reconstructing the gather from cell-centered plotfile fields.
+        //
+        // ParticleDiag already parses Ex/Ey/Ez/Bx/By/Bz into the m_plot_*
+        // flags for all full diagnostics. Historically the plotfile writer did
+        // not act on these flags, whereas the OpenPMD writer did. Support them
+        // here as well.
+        if (part_diag.m_plot_Ex || part_diag.m_plot_Ey || part_diag.m_plot_Ez ||
+            part_diag.m_plot_Bx || part_diag.m_plot_By || part_diag.m_plot_Bz)
+        {
+            WARPX_ALWAYS_ASSERT_WITH_MESSAGE(
+                !isBTD,
+                "Particle field output in plotfile format is currently supported "
+                "only for Full diagnostics, not back-transformed diagnostics."
+            );
+            storeFieldOnParticles(
+                tmp, true,
+                part_diag.m_plot_Ex, part_diag.m_plot_Ey, part_diag.m_plot_Ez,
+                part_diag.m_plot_Bx, part_diag.m_plot_By, part_diag.m_plot_Bz
+            );
+
+            // The vectors above were assembled before storeFieldOnParticles()
+            // added these runtime real components, so append their names/flags
+            // in the same order in which ParticleIO.cpp adds them.
+            if (part_diag.m_plot_Ex) { real_names.push_back("Ex"); real_flags.push_back(1); }
+            if (part_diag.m_plot_Ey) { real_names.push_back("Ey"); real_flags.push_back(1); }
+            if (part_diag.m_plot_Ez) { real_names.push_back("Ez"); real_flags.push_back(1); }
+            if (part_diag.m_plot_Bx) { real_names.push_back("Bx"); real_flags.push_back(1); }
+            if (part_diag.m_plot_By) { real_names.push_back("By"); real_flags.push_back(1); }
+            if (part_diag.m_plot_Bz) { real_names.push_back("Bz"); real_flags.push_back(1); }
+        }
+
         // real_names contains a list of all particle attributes.
         // real_flags & int_flags are 1 or 0, whether quantity is dumped or not.
         tmp.WritePlotFile(
