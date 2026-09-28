@@ -65,7 +65,14 @@ def step_from_parent(path):
         m=re.fullmatch(r"step(\d+)",part)
         if m:
             return int(m.group(1))
-    m=re.search(r"(\d+)$",os.path.basename(path.rstrip("/")))
+    base=os.path.basename(path.rstrip("/"))
+    # WarpX Full diagnostics use names such as diag1162000, i.e. the
+    # diagnostic name "diag1" followed by step 162000.  Strip that prefix
+    # before falling back to a generic trailing-integer parser.
+    m=re.fullmatch(r"diag1(\d+)",base)
+    if m:
+        return int(m.group(1))
+    m=re.search(r"(\d+)$",base)
     return int(m.group(1)) if m else -1
 
 

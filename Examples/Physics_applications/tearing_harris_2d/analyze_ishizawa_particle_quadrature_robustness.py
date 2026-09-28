@@ -172,6 +172,7 @@ def main():
         lines.append(f"LOO corrected error min/median/max = "
                      f"{loo_c.min():.8e} {np.median(loo_c):.8e} {loo_c.max():.8e}\n")
         lines.append(f"period-scan volume error min/max = {ev.min():.8e} {ev.max():.8e}\n")
+        lines.append(f"period at min volume error = {periods[np.argmin(ev)]:.8f}\n")
         lines.append(f"period-scan corrected error min/max = {ec.min():.8e} {ec.max():.8e}\n")
         lines.append(f"period at min corrected error = {periods[np.argmin(ec)]:.8f}\n")
         if edge:
@@ -183,6 +184,10 @@ def main():
             lines.append(
                 f"sliding windows: width={args.window_width:.8f} "
                 f"step={args.window_step:.8f} count={len(swa)}\n"
+            )
+            lines.append(
+                "sliding volume error min/median/max = "
+                f"{swa[:,2].min():.8e} {np.median(swa[:,2]):.8e} {swa[:,2].max():.8e}\n"
             )
             lines.append(
                 "sliding corrected error min/median/max = "
@@ -247,7 +252,8 @@ def main():
         for lab,sw in sliding_results:
             if len(sw)==0:
                 continue
-            axs[0].plot(sw[:,0],sw[:,3],"o-",label=f"{lab} corrected error")
+            axs[0].plot(sw[:,0],sw[:,2],"o-",label=f"{lab} volume error")
+            axs[0].plot(sw[:,0],sw[:,3],"o--",label=f"{lab} corrected error")
             axs[1].plot(sw[:,0],sw[:,4],"o-",label=f"{lab} corrected phase")
         axs[0].set_ylabel("complex closure error")
         axs[0].set_title(
