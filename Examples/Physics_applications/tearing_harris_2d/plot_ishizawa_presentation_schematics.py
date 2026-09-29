@@ -125,7 +125,7 @@ def breathing_cycle(out_dir,prefix):
     )
     ax.text(
         6,.55,
-        r"dominant restoring phase:  $Q^{m rand}_{i,xx}\propto -q$",
+        r"dominant restoring phase:  $Q^{\\rm rand}_{i,xx}\propto -q$",
         ha="center",fontsize=17
     )
     save(fig,out_dir,f"{prefix}_breathing_cycle")
