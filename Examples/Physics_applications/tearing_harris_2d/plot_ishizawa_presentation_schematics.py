@@ -105,10 +105,10 @@ def breathing_cycle(out_dir,prefix):
     ax.set_xlim(0,12); ax.set_ylim(0,7); ax.axis("off")
 
     states=[
-        (2.0,5.0,1.7,1.25,"Expanded\n$q>0$"),
-        (5.0,5.0,1.35,1.0,"Equilibrium\n$q\approx0$"),
-        (8.0,5.0,1.05,.78,"Contracted\n$q<0$"),
-        (5.0,1.8,1.35,1.0,"Equilibrium\n$q\approx0$"),
+        (2.0,5.0,1.7,1.25,"Expanded\n" + r"$q>0$"),
+        (5.0,5.0,1.35,1.0,"Equilibrium\n" + r"$q\approx0$"),
+        (8.0,5.0,1.05,.78,"Contracted\n" + r"$q<0$"),
+        (5.0,1.8,1.35,1.0,"Equilibrium\n" + r"$q\approx0$"),
     ]
     for cx,cy,a,b,label in states:
         draw_island(ax,cx,cy,a,b,label)
@@ -125,7 +125,7 @@ def breathing_cycle(out_dir,prefix):
     )
     ax.text(
         6,.55,
-        r"dominant restoring phase:  $Q^{\\rm rand}_{i,xx}\propto -q$",
+        r"dominant restoring phase:  $Q^{\mathrm{rand}}_{i,xx}\propto -q$",
         ha="center",fontsize=17
     )
     save(fig,out_dir,f"{prefix}_breathing_cycle")
@@ -181,8 +181,8 @@ def mechanism_chain(out_dir,prefix):
     )
 
     box(ax,(.5,3.9),2.2,1.0,"Island breathing\n$q(t)$",fontsize=17)
-    box(ax,(3.25,3.9),2.2,1.0,"Deep closed-island\ncore  $\chi<0.25$",fontsize=16)
-    box(ax,(6.0,3.9),2.2,1.0,r"Ion random $xx$\nstress",fontsize=17,lw=2.5)
+    box(ax,(3.25,3.9),2.2,1.0,"Deep closed-island\n" + r"core  $\chi<0.25$",fontsize=16)
+    box(ax,(6.0,3.9),2.2,1.0,"Ion random " + r"$xx$" + "\nstress",fontsize=17,lw=2.5)
     box(ax,(8.75,3.9),2.2,1.0,"Generalized\nrestoring force",fontsize=16)
     box(ax,(11.5,3.9),1.5,1.0,r"$-q$",fontsize=22)
 
