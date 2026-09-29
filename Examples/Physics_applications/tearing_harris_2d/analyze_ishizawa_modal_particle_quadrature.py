@@ -90,6 +90,57 @@ def parse_args():
     return p.parse_args()
 
 
+def load_breathing_coordinate_history(path, tmin=None, tmax=None):
+    """Return (t, q, source_kind) from a generalized or saturation history.
+
+    Generalized-EM history already stores q in column 4:
+        step, tau, Psi, width, q, ...
+
+    Saturation history stores island_full_width_de in column 4:
+        step, tau, Psi_LS, Psi_m1, width, ...
+
+    For saturation input we reconstruct the intended breathing coordinate
+        q = width / <width> - 1
+    using the finite samples inside the requested analysis window.  This is
+    crucial: treating raw positive width as q changes which snapshots are
+    selected as the opposite-qdot zero-crossing states used to construct xi.
+    """
+    with open(path,"r") as fh:
+        first=fh.readline().strip().lower()
+
+    a=np.loadtxt(path)
+    if a.ndim==1:
+        a=a[None,:]
+    t=np.asarray(a[:,1],float)
+
+    if "island_full_width_de" in first:
+        width=np.asarray(a[:,4],float)
+        m=np.isfinite(t)&np.isfinite(width)
+        if tmin is not None:
+            m &= t >= float(tmin)-1e-9
+        if tmax is not None:
+            m &= t <= float(tmax)+1e-9
+        if np.count_nonzero(m)<2:
+            raise RuntimeError("too few finite saturation-width samples in requested q window")
+        wbar=float(np.mean(width[m]))
+        if not np.isfinite(wbar) or abs(wbar)<=np.finfo(float).tiny:
+            raise RuntimeError("invalid mean island width while reconstructing q")
+        q=width/wbar-1.0
+        kind="saturation_width_normalized"
+    elif a.shape[1] >= 5 and (" q " in (" "+first+" ") or "width_de q" in first):
+        q=np.asarray(a[:,4],float)
+        kind="generalized_q"
+    else:
+        raise RuntimeError(
+            "cannot identify breathing-coordinate history format; expected "
+            "generalized history with a q column or saturation history with "
+            "island_full_width_de"
+        )
+
+    good=np.isfinite(t)&np.isfinite(q)
+    return t[good],q[good],kind
+
+
 def fit_phasor(t,y,T):
     t=np.asarray(t,float); y=np.asarray(y,float)
     u=t-t[0]
@@ -244,9 +295,9 @@ def main():
     if len(files)<6:
         raise RuntimeError(f"need >=6 particle-rich plotfiles; found {len(files)}")
 
-    eh=np.loadtxt(args.em_history)
-    if eh.ndim==1: eh=eh[None,:]
-    ht=eh[:,1]; hq=eh[:,4]
+    ht,hq,q_source_kind=load_breathing_coordinate_history(
+        args.em_history,args.tmin,args.tmax
+    )
     qfit,hqdot,hqddot,Rq,cq=harmonic_fit(ht,hq,args.period)
 
     # First pass: load only mode-resolution moments and identify states/crossings.
@@ -439,6 +490,7 @@ def main():
         f.write(f"ion kinetic harmonic R2 = {RkiR2:.8f}\n")
         f.write(f"electron kinetic harmonic R2 = {RkeR2:.8f}\n")
         f.write(f"mode crossings = {s_neg['step']} {s_pos['step']}\n")
+        f.write(f"breathing coordinate source = {q_source_kind}\n")
         f.write(f"mode coarsen = {args.mode_coarsen}\n")
         f.write(f"field coarsen = {args.field_coarsen}\n")
         f.write(f"x edge taper / de = {args.x_edge_taper_de:.8f}\n")
