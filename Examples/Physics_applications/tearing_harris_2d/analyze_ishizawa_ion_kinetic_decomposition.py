@@ -277,6 +277,8 @@ def ion_terms(path,P,Mmode,grads):
         rand=np.array([qrand_xx,qrand_xz,qrand_zx,qrand_zz],float),
         bulk_maps=np.stack([Bxx*Gxx,Bxz*Gxz,Bzx*Gzx,Bzz*Gzz],axis=0),
         rand_maps=np.stack([Rxx*Gxx,Rxz*Gxz,Rzx*Gzx,Rzz*Gzz],axis=0),
+        weight_map=W,
+        rand_xx_flux_map=Rxx,
     )
 
 
