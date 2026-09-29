@@ -144,9 +144,9 @@ def weak_form_budget(out_dir,prefix):
     box(ax,(.7,2.75),2.4,1.0,r"$dP_{\xi}/dt$",fontsize=24)
     ax.text(3.45,3.25,"=",fontsize=28,va="center")
 
-    box(ax,(4.0,4.65),2.2,.9,r"$Q_{\rm EM}$",fontsize=21)
-    box(ax,(4.0,3.05),2.2,.9,r"$Q_{{\rm kin},i}$",fontsize=21,lw=2.7)
-    box(ax,(4.0,1.45),2.2,.9,r"$Q_{{\rm kin},e}$",fontsize=21)
+    box(ax,(4.0,4.65),2.2,.9,r"$Q_{\mathrm{EM}}$",fontsize=21)
+    box(ax,(4.0,3.05),2.2,.9,r"$Q_{\mathrm{kin},i}$",fontsize=21,lw=2.7)
+    box(ax,(4.0,1.45),2.2,.9,r"$Q_{\mathrm{kin},e}$",fontsize=21)
 
     arrow(ax,(3.65,3.25),(4.0,5.1),lw=1.6)
     arrow(ax,(3.65,3.25),(4.0,3.5),lw=2.6)
