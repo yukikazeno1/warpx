@@ -73,6 +73,10 @@ def parse_args():
     p.add_argument("--period",type=float,required=True)
     p.add_argument("--tmin",type=float,default=4.05)
     p.add_argument("--tmax",type=float,default=5.90)
+    p.add_argument("--q-tmin",type=float,default=None,
+                   help="lower bound used only to normalize saturation width into q; default: --tmin")
+    p.add_argument("--q-tmax",type=float,default=None,
+                   help="upper bound used only to normalize saturation width into q; default: --tmax")
     p.add_argument("--mode-coarsen",type=int,default=4)
     p.add_argument("--core-z-de",type=float,default=12.0)
     p.add_argument("--mode-density-cut",type=float,default=0.02)
@@ -94,8 +98,10 @@ def build_fixed_mode(args,P):
     if len(files)<6:
         raise RuntimeError(f"need >=6 particle-rich plotfiles; found {len(files)}")
 
+    q_tmin=args.tmin if args.q_tmin is None else args.q_tmin
+    q_tmax=args.tmax if args.q_tmax is None else args.q_tmax
     ht,hq,q_source_kind=load_breathing_coordinate_history(
-        args.em_history,args.tmin,args.tmax
+        args.em_history,q_tmin,q_tmax
     )
     _,hqdot,_,Rq,_=harmonic_fit(ht,hq,args.period)
 
@@ -180,7 +186,7 @@ def build_fixed_mode(args,P):
         ddx(xiz),
         np.gradient(xiz,dz,axis=1,edge_order=2),
     )
-    return states,M,xix,xiz,grads,crossing_meta,q_source_kind,Rq
+    return states,M,xix,xiz,grads,crossing_meta,q_source_kind,Rq,q_tmin,q_tmax
 
 
 def bincount2(cell,val,ncell,nx,nz):
@@ -294,7 +300,7 @@ def main():
     yt.funcs.mylog.setLevel(40)
     P=params()
 
-    states,Mmode,xix,xiz,grads,crossings,qkind,Rq=build_fixed_mode(args,P)
+    states,Mmode,xix,xiz,grads,crossings,qkind,Rq,q_tmin,q_tmax=build_fixed_mode(args,P)
 
     rows=[]
     for k,s in enumerate(states,1):
@@ -371,6 +377,7 @@ def main():
         f.write(f"q harmonic R2 = {Rq:.8f}\n")
         f.write(f"mode crossings = {crossings[0]['step']} {crossings[1]['step']}\n")
         f.write(f"breathing coordinate source = {qkind}\n")
+        f.write(f"q normalization window = {q_tmin:.8f} .. {q_tmax:.8f}\n")
         f.write(f"mode coarsen = {args.mode_coarsen}\n")
         f.write(f"periodic x gradient = {int(args.periodic_x_gradient)}\n\n")
 
