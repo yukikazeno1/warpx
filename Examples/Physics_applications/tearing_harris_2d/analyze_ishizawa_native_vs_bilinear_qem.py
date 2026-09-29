@@ -37,7 +37,9 @@ from analyze_ishizawa_particle_moments import (
 from analyze_ishizawa_nonaffine_breathing_mode import (
     step_from_parent, harmonic_fit, smooth2, weighted_mean
 )
-from analyze_ishizawa_modal_particle_quadrature import interp_cc
+from analyze_ishizawa_modal_particle_quadrature import (
+    interp_cc, load_breathing_coordinate_history
+)
 
 
 def parse_args():
@@ -114,11 +116,11 @@ def build_mode(args, P):
     if len(files)<2:
         raise RuntimeError(f"need dense plotfiles under {args.phase_root}")
 
-    eh=np.loadtxt(args.em_history)
-    if eh.ndim==1:
-        eh=eh[None,:]
-    ht=eh[:,1]
-    hq=eh[:,4]
+    ht,hq,_=load_breathing_coordinate_history(
+        args.em_history,
+        getattr(args,"tmin",None),
+        getattr(args,"tmax",None)
+    )
     _,hqdot,_,_,_=harmonic_fit(ht,hq,args.period)
 
     # Metadata-only first pass to locate opposite-sign qdot crossings.
