@@ -275,7 +275,23 @@ def ion_terms(path,P,Mmode,grads):
         binned=np.array([qbin_xx,qbin_xz,qbin_zx,qbin_zz],float),
         bulk=np.array([qbulk_xx,qbulk_xz,qbulk_zx,qbulk_zz],float),
         rand=np.array([qrand_xx,qrand_xz,qrand_zx,qrand_zz],float),
+        bulk_maps=np.stack([Bxx*Gxx,Bxz*Gxz,Bzx*Gzx,Bzz*Gzz],axis=0),
+        rand_maps=np.stack([Rxx*Gxx,Rxz*Gxz,Rzx*Gzx,Rzz*Gzz],axis=0),
     )
+
+
+def phasor_map(t,Y,T):
+    """Fit offset+trend+fundamental independently at every spatial cell."""
+    t=np.asarray(t,float)
+    Y=np.asarray(Y,float)
+    u=t-t[0]
+    om=2*np.pi/T
+    M=np.column_stack([np.ones_like(u),u,np.cos(om*u),np.sin(om*u)])
+    pinv=np.linalg.pinv(M)
+    shp=Y.shape[1:]
+    C=pinv @ Y.reshape(len(t),-1)
+    Z=(C[2]-1j*C[3]).reshape(shp)
+    return Z
 
 
 def phasor_stats(t,q,series,T):
@@ -303,6 +319,8 @@ def main():
     states,Mmode,xix,xiz,grads,crossings,qkind,Rq,q_tmin,q_tmax=build_fixed_mode(args,P)
 
     rows=[]
+    bulk_maps_time=[]
+    rand_maps_time=[]
     for k,s in enumerate(states,1):
         R=ion_terms(s["fn"],P,Mmode,grads)
         ex=R["exact"]/P["wci"]
@@ -318,6 +336,8 @@ def main():
             np.sum(rr),*rr,
             R["N"]
         ])
+        bulk_maps_time.append(R["bulk_maps"]/P["wci"])
+        rand_maps_time.append(R["rand_maps"]/P["wci"])
         print(
             f"[{k:02d}/{len(states):02d}] step={s['step']} tau={s['t']:.6f} "
             f"Nion={R['N']} bin/direct={np.sum(bn)/direct:+.6f}"
@@ -367,6 +387,33 @@ def main():
     bulk_rand_rel=np.sqrt(np.mean((A[:,13]+A[:,18]-binned_total)**2))/max(
         np.sqrt(np.mean(binned_total**2)),1e-300
     )
+
+    # Spatial breathing-frequency phasors of the coarse-grained bulk/random
+    # contributions. Each map stores the *cell-integrated* contribution, so
+    # summing over cells reproduces the corresponding global phasor.
+    bulk_maps_time=np.asarray(bulk_maps_time,float)  # nt,4,nx,nz
+    rand_maps_time=np.asarray(rand_maps_time,float)
+    Zbulk_maps=np.stack(
+        [phasor_map(t,bulk_maps_time[:,j],args.period) for j in range(4)],axis=0
+    )
+    Zrand_maps=np.stack(
+        [phasor_map(t,rand_maps_time[:,j],args.period) for j in range(4)],axis=0
+    )
+    Zbulk_total_map=np.sum(Zbulk_maps,axis=0)
+    Zrand_total_map=np.sum(Zrand_maps,axis=0)
+
+    eq=Zq/max(abs(Zq),1e-300)
+    # Signed projections onto the restoring direction -q and damping
+    # direction -qdot. Since qdot phasor is i*omega*Zq, its unit direction is i*eq.
+    def restore_map(Z):
+        return np.real(Z*np.conj(-eq))/max(abs(Zkin),1e-300)
+    def damp_map(Z):
+        return np.real(Z*np.conj(-1j*eq))/max(abs(Zkin),1e-300)
+
+    rand_xx_restore=restore_map(Zrand_maps[0])
+    rand_xx_damp=damp_map(Zrand_maps[0])
+    rand_total_restore=restore_map(Zrand_total_map)
+    bulk_total_restore=restore_map(Zbulk_total_map)
 
     with open(args.out_prefix+"_summary.txt","w") as f:
         f.write("Ion kinetic/stress decomposition for q-fixed breathing mode\n")
@@ -505,12 +552,75 @@ def main():
     fig.savefig(args.out_prefix+"_bulk_random_complex.png",dpi=210)
     plt.close(fig)
 
+    # Spatial localization of the dominant pressure-like restoring channel.
+    xde=Mmode["x"]/P["de"]
+    zde=Mmode["z"]/P["de"]
+    extent=[xde.min(),xde.max(),zde.min(),zde.max()]
+
+    def save_map(arr,name,title,cbar):
+        fig,ax=plt.subplots(figsize=(8.4,5.8))
+        vmax=np.nanpercentile(np.abs(arr),99.5)
+        if not np.isfinite(vmax) or vmax<=0:
+            vmax=np.nanmax(np.abs(arr))
+        im=ax.imshow(
+            arr.T,origin="lower",extent=extent,aspect="auto",
+            vmin=-vmax,vmax=vmax,cmap="RdBu_r"
+        )
+        ax.set_xlabel(r"$x/d_e$")
+        ax.set_ylabel(r"$z/d_e$")
+        ax.set_title(title)
+        cb=fig.colorbar(im,ax=ax)
+        cb.set_label(cbar)
+        fig.tight_layout()
+        fig.savefig(name,dpi=210)
+        plt.close(fig)
+
+    save_map(
+        rand_xx_restore,
+        args.out_prefix+"_rand_xx_restoring_map.png",
+        "Ion random/pressure-like xx restoring projection",
+        r"cell contribution / $|Z_{kin,i}|$"
+    )
+    save_map(
+        rand_total_restore,
+        args.out_prefix+"_rand_total_restoring_map.png",
+        "Ion random/pressure-like total restoring projection",
+        r"cell contribution / $|Z_{kin,i}|$"
+    )
+    save_map(
+        rand_xx_damp,
+        args.out_prefix+"_rand_xx_damping_map.png",
+        "Ion random/pressure-like xx damping projection",
+        r"cell contribution / $|Z_{kin,i}|$"
+    )
+    save_map(
+        bulk_total_restore,
+        args.out_prefix+"_bulk_total_restoring_map.png",
+        "Ion bulk/advective total restoring projection",
+        r"cell contribution / $|Z_{kin,i}|$"
+    )
+
+    np.savez_compressed(
+        args.out_prefix+"_spatial_phasors.npz",
+        x_de=xde,z_de=zde,
+        Zbulk=Zbulk_maps,Zrand=Zrand_maps,
+        rand_xx_restoring=rand_xx_restore,
+        rand_xx_damping=rand_xx_damp,
+        rand_total_restoring=rand_total_restore,
+        bulk_total_restoring=bulk_total_restore,
+    )
+
     print("Saved",args.out_prefix+"_summary.txt")
     print("Saved",args.out_prefix+"_history.txt")
     print("Saved",args.out_prefix+"_tensor_time.png")
     print("Saved",args.out_prefix+"_tensor_complex.png")
     print("Saved",args.out_prefix+"_bulk_random_time.png")
     print("Saved",args.out_prefix+"_bulk_random_complex.png")
+    print("Saved",args.out_prefix+"_rand_xx_restoring_map.png")
+    print("Saved",args.out_prefix+"_rand_total_restoring_map.png")
+    print("Saved",args.out_prefix+"_rand_xx_damping_map.png")
+    print("Saved",args.out_prefix+"_bulk_total_restoring_map.png")
+    print("Saved",args.out_prefix+"_spatial_phasors.npz")
 
 
 if __name__=="__main__":
