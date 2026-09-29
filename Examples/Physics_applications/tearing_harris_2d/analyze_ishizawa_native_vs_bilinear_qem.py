@@ -51,6 +51,10 @@ def parse_args():
     p.add_argument("--em-history", required=True,
                    help="ishizawa_saturation_history.txt used to define q(t)")
     p.add_argument("--period", type=float, required=True)
+    p.add_argument("--tmin", type=float, default=4.05,
+                   help="time-window lower bound used to normalize saturation width into q")
+    p.add_argument("--tmax", type=float, default=5.95,
+                   help="time-window upper bound used to normalize saturation width into q")
     p.add_argument("--mode-coarsen", type=int, default=4)
     p.add_argument("--core-z-de", type=float, default=12.0)
     p.add_argument("--mode-density-cut", type=float, default=0.02)
